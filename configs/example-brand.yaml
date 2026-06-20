@@ -1,0 +1,29 @@
+# Example brand config — copy and customize per brand.
+# Pass to generate scripts with: --config configs/my-brand.yaml
+# Sizes kept small for CPU inference on UM880 Plus (32GB RAM).
+
+brand_name: "Acme Corp"
+
+image:
+  model: flux-schnell-q4
+  width: 512
+  height: 512
+  steps: 4
+  guidance_scale: 0.0
+  style_prefix: "Professional product photography, clean white background, studio lighting"
+  negative_prompt: "blurry, low quality, watermark, text overlay, amateur"
+
+video:
+  model: wan2.1-1.3b
+  width: 480
+  height: 320
+  num_frames: 33
+  steps: 30
+  fps: 16
+  style_prefix: "Cinematic brand video, smooth camera motion, professional color grading"
+  negative_prompt: "shaky, low resolution, artifacts, glitch"
+
+style_tokens:
+  - "modern minimalist aesthetic"
+  - "brand colors: navy blue and gold"
+  - "premium feel"
