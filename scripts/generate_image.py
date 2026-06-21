@@ -3,6 +3,7 @@
 
 import argparse
 import sys
+import time
 from datetime import datetime
 from pathlib import Path
 
@@ -152,12 +153,20 @@ def generate(
         generator = torch.Generator("cpu").manual_seed(seed)
 
     savers = "low-VRAM offload+slicing" if low_vram_on else "none"
-    print(f"Loading {model_name} on '{device}' ({torch_dtype}, memory savers: {savers})...")
+    print(f"[1/3] Loading {model_name} on '{device}' ({torch_dtype}, memory savers: {savers})...")
+    print("      (loading + offload setup is the slow, quiet part — please wait)")
+    t0 = time.monotonic()
     pipe = loader(model_path, device, torch_dtype, low_vram_on)
-
-    print(f"Generating {batch_size} image(s) at {width}x{height}, {steps} steps...")
+    print(f"[2/3] Model ready in {time.monotonic() - t0:.0f}s. "
+          f"Generating {batch_size} image(s) at {width}x{height}, {steps} steps...")
     if device == "cpu":
-        print(f"NOTE: CPU inference is slow. Expect ~2-5 min per image at 512x512.")
+        print("      NOTE: CPU inference is slow. Expect ~2-5 min per image at 512x512.")
+
+    # Per-step progress so there's a visible heartbeat in SSH/log output (the tqdm
+    # bar alone can be invisible when stdout isn't a live terminal).
+    def on_step(pipe_, step, timestep, cb_kwargs):
+        print(f"      step {step + 1}/{steps}  ({time.monotonic() - t0:.0f}s elapsed)")
+        return cb_kwargs
 
     kwargs = dict(
         prompt=prompt,
@@ -167,11 +176,13 @@ def generate(
         guidance_scale=guidance_scale,
         num_images_per_prompt=batch_size,
         generator=generator,
+        callback_on_step_end=on_step,
     )
     if negative_prompt and model_name not in ("flux-schnell-q4",):
         kwargs["negative_prompt"] = negative_prompt
 
     result = pipe(**kwargs)
+    print(f"[3/3] Inference done in {time.monotonic() - t0:.0f}s. Saving...")
 
     output_dir.mkdir(parents=True, exist_ok=True)
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")

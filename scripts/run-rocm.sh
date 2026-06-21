@@ -160,6 +160,7 @@ exec docker run --rm $TTY_FLAGS \
     -e "GPU_MAX_HW_QUEUES=$GPU_MAX_HW_QUEUES" \
     -e "PYTORCH_HIP_ALLOC_CONF=$PYTORCH_HIP_ALLOC_CONF" \
     -e "HOME=$CONTAINER_HOME" \
+    -e PYTHONUNBUFFERED=1 \
     -e "HF_HOME=/work/.hf-cache" \
     -e HF_TOKEN -e HUGGING_FACE_HUB_TOKEN \
     -v "$PROJECT_DIR":/work \

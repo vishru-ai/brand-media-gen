@@ -3,6 +3,7 @@
 
 import argparse
 import sys
+import time
 from datetime import datetime
 from pathlib import Path
 
@@ -137,13 +138,20 @@ def generate(
         generator = torch.Generator("cpu").manual_seed(seed)
 
     savers = "low-VRAM offload+slicing" if low_vram_on else "none"
-    print(f"Loading {model_name} on '{device}' ({torch_dtype}, memory savers: {savers})...")
+    print(f"[1/3] Loading {model_name} on '{device}' ({torch_dtype}, memory savers: {savers})...")
+    print("      (loading + offload setup is the slow, quiet part — please wait)")
+    t0 = time.monotonic()
     pipe = loader(model_path, device, torch_dtype, low_vram_on)
-
-    print(f"Generating video: {width}x{height}, {num_frames} frames, {steps} steps...")
+    print(f"[2/3] Model ready in {time.monotonic() - t0:.0f}s. "
+          f"Generating video: {width}x{height}, {num_frames} frames, {steps} steps...")
     if device == "cpu":
-        print(f"NOTE: CPU video generation is very slow. Expect ~30-60 min for a 2-second clip.")
-    print(f"TIP: Reduce --steps or --num-frames to speed up. Use --steps 15 for drafts.")
+        print("      NOTE: CPU video generation is very slow. Expect ~30-60 min for a 2-second clip.")
+    print("      TIP: Reduce --steps or --num-frames to speed up. Use --steps 15 for drafts.")
+
+    # Per-step progress so SSH/log output has a visible heartbeat.
+    def on_step(pipe_, step, timestep, cb_kwargs):
+        print(f"      step {step + 1}/{steps}  ({time.monotonic() - t0:.0f}s elapsed)")
+        return cb_kwargs
 
     kwargs = dict(
         prompt=prompt,
@@ -157,7 +165,13 @@ def generate(
     if negative_prompt:
         kwargs["negative_prompt"] = negative_prompt
 
-    result = pipe(**kwargs)
+    # Not every pipeline accepts callback_on_step_end; fall back if unsupported.
+    try:
+        result = pipe(**kwargs, callback_on_step_end=on_step)
+    except TypeError:
+        print("      (per-step progress unsupported by this pipeline; running without it)")
+        result = pipe(**kwargs)
+    print(f"[3/3] Inference done in {time.monotonic() - t0:.0f}s. Encoding...")
     frames = result.frames[0]
 
     output_dir.mkdir(parents=True, exist_ok=True)
