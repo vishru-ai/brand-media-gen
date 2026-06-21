@@ -18,7 +18,6 @@ apt-get update && apt-get upgrade -y
 apt-get install -y \
     build-essential \
     git \
-    git-lfs \
     curl \
     wget \
     unzip \
@@ -38,7 +37,9 @@ apt-get install -y \
     ninja-build \
     openssh-server
 
-git lfs install
+# NOTE: git-lfs is intentionally NOT installed/initialized here. Models are
+# fetched via the Hugging Face CLI, not LFS, and running `git lfs install` under
+# sudo writes root-owned hooks into the repo's .git, which breaks later pushes.
 
 # Enable SSH so GPU runs can be driven/observed from another machine. The iGPU
 # drives the display and can hang during ROCm compute, taking the desktop down;
