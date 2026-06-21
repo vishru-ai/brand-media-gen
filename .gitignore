@@ -4,3 +4,11 @@ output/
 __pycache__/
 *.pyc
 .env
+.container-venv/
+.container-deps/
+.container-home/
+.hf-cache/
+
+# Kernel/process core dumps (e.g. from GPU hangs) — large, never commit
+core
+core.*

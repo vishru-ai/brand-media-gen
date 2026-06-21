@@ -11,10 +11,30 @@ PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
 MODELS_DIR="$PROJECT_DIR/models"
 mkdir -p "$MODELS_DIR"
 
+# Load local secrets (HF_TOKEN) if present so gated repos (e.g. FLUX) authenticate.
+# .env is gitignored; 'set -a' exports what we source so huggingface_hub picks it up.
+if [[ -f "$PROJECT_DIR/.env" ]]; then
+    set -a
+    # shellcheck disable=SC1091
+    source "$PROJECT_DIR/.env"
+    set +a
+fi
+
 source "$PROJECT_DIR/venv/bin/activate" 2>/dev/null || {
     echo "ERROR: Virtual environment not found. Run 01-install-deps.sh first."
     exit 1
 }
+
+# huggingface_hub >=0.34 renamed the CLI to `hf`; `huggingface-cli` is removed in
+# 1.0. Prefer `hf` and fall back to the legacy name for older installs.
+if command -v hf >/dev/null 2>&1; then
+    HF_CLI="hf"
+elif command -v huggingface-cli >/dev/null 2>&1; then
+    HF_CLI="huggingface-cli"
+else
+    echo "ERROR: Hugging Face CLI not found. Run 01-install-deps.sh first."
+    exit 1
+fi
 
 download_model() {
     local name="$1"
@@ -29,9 +49,9 @@ download_model() {
 
     echo "  [download] $name from $repo ..."
     if [[ -n "$extra_args" ]]; then
-        eval huggingface-cli download "$repo" --local-dir "$dest" $extra_args
+        eval "$HF_CLI" download "$repo" --local-dir "$dest" $extra_args
     else
-        huggingface-cli download "$repo" --local-dir "$dest"
+        "$HF_CLI" download "$repo" --local-dir "$dest"
     fi
     echo "  [done] $name"
 }

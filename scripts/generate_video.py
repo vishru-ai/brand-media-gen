@@ -14,14 +14,50 @@ MODELS_DIR = PROJECT_DIR / "models"
 OUTPUT_DIR = PROJECT_DIR / "output" / "videos"
 
 
-def load_wan21(model_path: Path):
+def resolve_device(choice: str = "auto") -> str:
+    """Map a --device choice to an actual torch device.
+
+    ROCm GPUs are exposed through the CUDA API, so an available Radeon iGPU
+    shows up as "cuda" here too.
+    """
+    if choice == "auto":
+        return "cuda" if torch.cuda.is_available() else "cpu"
+    return choice
+
+
+DTYPE_MAP = {"fp16": torch.float16, "fp32": torch.float32, "bf16": torch.bfloat16}
+
+
+def resolve_dtype(choice: str, device: str):
+    """Pick a tensor dtype. 'auto' uses fp16 on GPU (half the memory of fp32) and
+    fp32 on CPU (fp16 is slow/unstable on CPU)."""
+    if choice != "auto":
+        return DTYPE_MAP[choice]
+    return torch.float16 if device == "cuda" else torch.float32
+
+
+def load_wan21(model_path: Path, device: str, dtype, low_vram: bool):
     from diffusers import WanPipeline
 
     pipe = WanPipeline.from_pretrained(
         str(model_path),
-        torch_dtype=torch.float32,
+        torch_dtype=dtype,
     )
-    pipe = pipe.to("cpu")
+
+    # The Radeon 780M shares system RAM and drives the display; an OOM here hangs
+    # the GPU and the desktop. Offload idle submodules and slice the VAE to bound
+    # peak memory. Do NOT also call pipe.to("cuda") when offload is enabled.
+    if device == "cuda" and low_vram:
+        pipe.enable_model_cpu_offload()
+    else:
+        pipe = pipe.to(device)
+
+    for fn in ("enable_attention_slicing", "enable_vae_slicing", "enable_vae_tiling"):
+        if hasattr(pipe, fn):
+            try:
+                getattr(pipe, fn)()
+            except Exception:
+                pass
     return pipe
 
 
@@ -66,8 +102,14 @@ def generate(
     guidance_scale: float = -1.0,
     fps: int = 0,
     seed: int = -1,
+    device: str = "auto",
+    dtype: str = "auto",
+    low_vram: str = "auto",
     output_dir: Path = OUTPUT_DIR,
 ):
+    device = resolve_device(device)
+    torch_dtype = resolve_dtype(dtype, device)
+    low_vram_on = (device == "cuda") if low_vram == "auto" else (low_vram == "on")
     model_path = MODELS_DIR / model_name
     if not model_path.exists():
         print(f"ERROR: Model not found at {model_path}")
@@ -88,15 +130,19 @@ def generate(
         guidance_scale = d["guidance_scale"]
     fps = fps or d["fps"]
 
+    # CPU generator works for both CPU and GPU/offload pipelines without
+    # device-mismatch errors.
     generator = None
     if seed >= 0:
         generator = torch.Generator("cpu").manual_seed(seed)
 
-    print(f"Loading {model_name} (CPU inference — this takes a minute)...")
-    pipe = loader(model_path)
+    savers = "low-VRAM offload+slicing" if low_vram_on else "none"
+    print(f"Loading {model_name} on '{device}' ({torch_dtype}, memory savers: {savers})...")
+    pipe = loader(model_path, device, torch_dtype, low_vram_on)
 
     print(f"Generating video: {width}x{height}, {num_frames} frames, {steps} steps...")
-    print(f"NOTE: CPU video generation is very slow. Expect ~30-60 min for a 2-second clip.")
+    if device == "cpu":
+        print(f"NOTE: CPU video generation is very slow. Expect ~30-60 min for a 2-second clip.")
     print(f"TIP: Reduce --steps or --num-frames to speed up. Use --steps 15 for drafts.")
 
     kwargs = dict(
@@ -137,6 +183,19 @@ def main():
     parser.add_argument("--guidance-scale", "-g", type=float, default=-1.0)
     parser.add_argument("--fps", type=int, default=0)
     parser.add_argument("--seed", type=int, default=-1)
+    parser.add_argument(
+        "--device", "-d", default="auto", choices=["auto", "cpu", "cuda"],
+        help="Compute device. 'auto' uses the GPU (incl. ROCm) if available, else CPU.",
+    )
+    parser.add_argument(
+        "--dtype", default="auto", choices=["auto", "fp16", "fp32", "bf16"],
+        help="Tensor precision. 'auto' = fp16 on GPU, fp32 on CPU.",
+    )
+    parser.add_argument(
+        "--lowvram", default="auto", choices=["auto", "on", "off"],
+        help="CPU offload + attention/VAE slicing to cap memory. 'auto' = on for GPU. "
+             "Keep on for the Radeon 780M to avoid OOM/GPU hangs.",
+    )
     parser.add_argument("--output-dir", "-o", type=Path, default=OUTPUT_DIR)
     parser.add_argument("--config", "-c", type=Path, help="YAML brand config")
 
@@ -164,6 +223,9 @@ def main():
         guidance_scale=args.guidance_scale,
         fps=args.fps,
         seed=args.seed,
+        device=args.device,
+        dtype=args.dtype,
+        low_vram=args.lowvram,
         output_dir=args.output_dir,
     )
 

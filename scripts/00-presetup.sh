@@ -23,9 +23,10 @@ apt-get install -y \
     wget \
     unzip \
     software-properties-common \
-    python3.11 \
-    python3.11-venv \
-    python3.11-dev \
+    python3 \
+    python3-venv \
+    python3-dev \
+    python3-full \
     python3-pip \
     ffmpeg \
     libgl1 \
@@ -34,9 +35,18 @@ apt-get install -y \
     libxext6 \
     libxrender1 \
     cmake \
-    ninja-build
+    ninja-build \
+    openssh-server
 
 git lfs install
+
+# Enable SSH so GPU runs can be driven/observed from another machine. The iGPU
+# drives the display and can hang during ROCm compute, taking the desktop down;
+# an SSH session survives that, letting you watch logs and reboot cleanly instead
+# of hard-resetting. Connect with: ssh <user>@<this-box-ip>  (ip -4 addr to find it)
+echo "Enabling SSH server..."
+systemctl enable --now ssh 2>/dev/null || systemctl enable --now sshd 2>/dev/null || \
+    echo "WARNING: could not enable ssh service automatically."
 
 # ── 2. CPU performance tuning ───────────────────────────────────────
 echo "[2/4] Configuring CPU performance..."
@@ -69,19 +79,38 @@ else
 fi
 
 # ── 3. AMD ROCm (optional iGPU acceleration) ────────────────────────
-echo "[3/4] Installing AMD ROCm for Radeon 780M iGPU (optional)..."
+# Skipped by default: there is no ROCm apt repo built for Ubuntu 26.04
+# (resolute) yet, and the Radeon 780M (gfx1103) is barely ROCm-supported. The
+# iGPU is NOT used for inference (see README) — CPU is the supported path.
+# Opt in with: INSTALL_ROCM=1 sudo bash scripts/00-presetup.sh
+echo "[3/4] AMD ROCm (Radeon 780M iGPU)..."
 
-# Add ROCm repo
-wget -q https://repo.radeon.com/rocm/rocm.gpg.key -O - | gpg --dearmor -o /etc/apt/keyrings/rocm.gpg
-echo "deb [arch=amd64 signed-by=/etc/apt/keyrings/rocm.gpg] https://repo.radeon.com/rocm/apt/latest noble main" \
-    > /etc/apt/sources.list.d/rocm.list
-apt-get update
+install_rocm() {
+    mkdir -p /etc/apt/keyrings
+    wget -q https://repo.radeon.com/rocm/rocm.gpg.key -O - \
+        | gpg --dearmor -o /etc/apt/keyrings/rocm.gpg || return 1
 
-# Install minimal ROCm (no full HPC stack — just what PyTorch needs)
-apt-get install -y rocm-hip-runtime rocm-opencl-runtime || {
-    echo "WARNING: ROCm install failed. CPU-only inference will still work."
-    echo "The Radeon 780M iGPU has limited ROCm support — this is expected."
+    # No 'resolute' repo exists yet; fall back to the newest LTS ROCm repo (noble).
+    echo "deb [arch=amd64 signed-by=/etc/apt/keyrings/rocm.gpg] https://repo.radeon.com/rocm/apt/latest noble main" \
+        > /etc/apt/sources.list.d/rocm.list
+
+    # Update only the ROCm repo so a broken repo doesn't fail the whole apt cache.
+    apt-get update -o Dir::Etc::sourcelist=/etc/apt/sources.list.d/rocm.list \
+        -o Dir::Etc::sourceparts=/dev/null -o APT::Get::List-Cleanup=0 || return 1
+
+    apt-get install -y rocm-hip-runtime rocm-opencl-runtime || return 1
 }
+
+if [[ "${INSTALL_ROCM:-0}" != "1" ]]; then
+    echo "Skipping ROCm (not used for inference). Set INSTALL_ROCM=1 to attempt it."
+elif install_rocm; then
+    echo "ROCm runtime installed."
+else
+    echo "NOTE: ROCm install failed — expected on Ubuntu 26.04 (no resolute repo)."
+    echo "CPU inference is unaffected and is the supported path."
+    # Remove the repo so it can't break future 'apt-get update' calls.
+    rm -f /etc/apt/sources.list.d/rocm.list
+fi
 
 # Add user to video/render groups for GPU access
 REAL_USER="${SUDO_USER:-$USER}"
@@ -101,7 +130,7 @@ echo "Swap:"
 swapon --show
 echo ""
 echo "Python:"
-python3.11 --version
+python3 --version
 echo ""
 echo "FFmpeg:"
 ffmpeg -version | head -1
