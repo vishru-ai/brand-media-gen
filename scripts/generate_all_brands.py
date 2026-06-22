@@ -133,8 +133,10 @@ def build_tasks(brand_filter: set | None, format_filter: set | None) -> list:
     return tasks
 
 
-def out_path(brand_slug: str, product_slug: str, fmt_name: str) -> Path:
-    return OUTPUT_DIR / brand_slug / f"{product_slug}--{fmt_name}.jpg"
+def out_path(model_name: str, brand_slug: str, product_slug: str, fmt_name: str) -> Path:
+    # Per-model subfolder so FLUX and SDXL outputs don't overwrite each other:
+    #   output/brands/<model>/<brand>/<product>--<format>.jpg
+    return OUTPUT_DIR / model_name / brand_slug / f"{product_slug}--{fmt_name}.jpg"
 
 
 def build_prompt(brand: dict, product: dict, fmt_name: str) -> str:
@@ -151,12 +153,12 @@ def target_dims(fmt_name: str, draft: bool) -> tuple[int, int]:
 
 # ── Dry-run printer ────────────────────────────────────────────────────────────
 
-def dry_run(tasks: list, draft: bool) -> None:
+def dry_run(tasks: list, draft: bool, model_name: str) -> None:
     print(f"\nDry-run — {len(tasks)} images would be generated\n")
-    col = max(len(str(out_path(b["slug"], p["slug"], f).relative_to(PROJECT_DIR)))
+    col = max(len(str(out_path(model_name, b["slug"], p["slug"], f).relative_to(PROJECT_DIR)))
               for b, p, f in tasks)
     for i, (brand, product, fmt_name) in enumerate(tasks, 1):
-        path = out_path(brand["slug"], product["slug"], fmt_name)
+        path = out_path(model_name, brand["slug"], product["slug"], fmt_name)
         w, h = target_dims(fmt_name, draft)
         exists = "✓" if path.exists() else " "
         rel = str(path.relative_to(PROJECT_DIR))
@@ -176,7 +178,7 @@ def run(args: argparse.Namespace) -> None:
         return
 
     if args.dry_run:
-        dry_run(tasks, args.draft)
+        dry_run(tasks, args.draft, args.model)
         return
 
     # ── Set up log file ────────────────────────────────────────────────────────
@@ -190,16 +192,19 @@ def run(args: argparse.Namespace) -> None:
     print(f"Time: {datetime.now().isoformat(timespec='seconds')}")
     print()
 
-    # ── Skip files that already exist when --resume is set ────────────────────
-    if args.resume:
+    # ── Skip files that already exist (default; --force regenerates) ──────────
+    # Resumable by default: only missing files are generated, so re-running after
+    # an interruption picks up where it left off without overwriting good output.
+    if not args.force:
         before = len(tasks)
         tasks = [(b, p, f) for b, p, f in tasks
-                 if not out_path(b["slug"], p["slug"], f).exists()]
+                 if not out_path(args.model, b["slug"], p["slug"], f).exists()]
         skipped = before - len(tasks)
         if skipped:
-            print(f"Skipping {skipped} already-generated file(s) (--resume).")
+            print(f"Skipping {skipped} existing file(s); generating {len(tasks)} missing. "
+                  f"(use --force to regenerate all)")
         if not tasks:
-            print("All images already generated.")
+            print("All images already generated — nothing to do. (use --force to regenerate)")
             return
 
     total = len(tasks)
@@ -242,7 +247,7 @@ def run(args: argparse.Namespace) -> None:
 
     # ── Per-image loop ─────────────────────────────────────────────────────────
     for i, (brand, product, fmt_name) in enumerate(tasks, 1):
-        path    = out_path(brand["slug"], product["slug"], fmt_name)
+        path    = out_path(model_name, brand["slug"], product["slug"], fmt_name)
         w, h    = target_dims(fmt_name, args.draft)
         prompt  = build_prompt(brand, product, fmt_name)
         neg     = brand.get("negative", "")
@@ -295,7 +300,7 @@ def run(args: argparse.Namespace) -> None:
         _write_progress(i, total, last_label, t_session)
 
     _write_progress(total, total, "COMPLETE", t_session)
-    print(f"Done. {total} image(s) saved to {OUTPUT_DIR}")
+    print(f"Done. {total} image(s) saved to {OUTPUT_DIR / model_name}")
 
 
 # ── CLI ────────────────────────────────────────────────────────────────────────
@@ -322,8 +327,13 @@ def main() -> None:
         help="List all tasks without generating anything.",
     )
     parser.add_argument(
+        "--force", action="store_true",
+        help="Regenerate and overwrite files that already exist. "
+             "By default, existing files are skipped (resumable).",
+    )
+    parser.add_argument(
         "--resume", action="store_true",
-        help="Skip files that already exist in output/brands/.",
+        help="Deprecated no-op: skipping existing files is now the default.",
     )
     parser.add_argument(
         "--draft", action="store_true",
