@@ -25,10 +25,30 @@ HSA_OVERRIDE="${HSA_OVERRIDE_GFX_VERSION:-11.0.0}"
 # HW queues are common sources of GPU hangs on Ryzen APUs under ROCm; disabling
 # SDMA and capping queues trades a little speed for not hanging the display.
 # The alloc conf reduces memory fragmentation/spikes on the shared-RAM iGPU.
+# hipBLASLt has no real gfx1103 support and hangs/segfaults on the first GEMM
+# ("GPU Hang" at step 0) — force the stable rocBLAS path instead.
+# HSA_XNACK=0 disables page-fault-based SVM (unified-memory) migration. On the
+# 780M that path (svm_range_deferred_list_work) thrashes and wedges the MES queue
+# scheduler ("MES failed to respond ... unrecoverable state") — disabling it
+# forces pinned allocations and avoids the hang. See dmesg amdgpu MES/SVM errors.
+# HSA_USE_SVM=0 goes further: it disables SVM usage in the ROCr runtime entirely
+# (not just fault-based migration), to fully kill the svm_range_restore_work
+# thrash that precedes the MES wedge. Pair with the kernel param amdgpu.cwsr_enable=0
+# (disables compute wave save/restore — the queue-preemption path that the MES
+# "Failed to evict queue / REMOVE_QUEUE" errors come from).
 # All overridable from the environment.
 HSA_ENABLE_SDMA="${HSA_ENABLE_SDMA:-0}"
 GPU_MAX_HW_QUEUES="${GPU_MAX_HW_QUEUES:-1}"
-PYTORCH_HIP_ALLOC_CONF="${PYTORCH_HIP_ALLOC_CONF:-garbage_collection_threshold:0.8,max_split_size_mb:512}"
+PYTORCH_HIP_ALLOC_CONF="${PYTORCH_HIP_ALLOC_CONF:-expandable_segments:True,garbage_collection_threshold:0.8}"
+TORCH_BLAS_PREFER_HIPBLASLT="${TORCH_BLAS_PREFER_HIPBLASLT:-0}"
+HSA_XNACK="${HSA_XNACK:-0}"
+HSA_USE_SVM="${HSA_USE_SVM:-0}"
+# MIOpen ships hand-written GCN assembly kernels (e.g. miopenSp3AsmConvFury…) built
+# for specific ISAs. Under the gfx1100 spoof they emit opcodes that are ILLEGAL on
+# the real gfx1103 -> "Illegal opcode in command stream" / HSA_STATUS_ERROR_INVALID_ISA
+# (hits SDXL's conv layers). Disabling asm kernels forces JIT HIP kernels that respect
+# the actual ISA. (Alternative: set HSA_OVERRIDE_GFX_VERSION=11.0.3 to drop the spoof.)
+MIOPEN_DEBUG_GCN_ASM_KERNELS="${MIOPEN_DEBUG_GCN_ASM_KERNELS:-0}"
 
 # Run the container as the host user so files written to the mounted volume
 # (output/, .container-deps/, .hf-cache/) are owned by you, not root.
@@ -159,6 +179,10 @@ exec docker run --rm $TTY_FLAGS \
     -e "HSA_ENABLE_SDMA=$HSA_ENABLE_SDMA" \
     -e "GPU_MAX_HW_QUEUES=$GPU_MAX_HW_QUEUES" \
     -e "PYTORCH_HIP_ALLOC_CONF=$PYTORCH_HIP_ALLOC_CONF" \
+    -e "TORCH_BLAS_PREFER_HIPBLASLT=$TORCH_BLAS_PREFER_HIPBLASLT" \
+    -e "HSA_XNACK=$HSA_XNACK" \
+    -e "HSA_USE_SVM=$HSA_USE_SVM" \
+    -e "MIOPEN_DEBUG_GCN_ASM_KERNELS=$MIOPEN_DEBUG_GCN_ASM_KERNELS" \
     -e "HOME=$CONTAINER_HOME" \
     -e PYTHONUNBUFFERED=1 \
     -e "HF_HOME=/work/.hf-cache" \

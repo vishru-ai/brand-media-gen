@@ -86,15 +86,19 @@ mkdir -p "$DEST_SCOPE"
 RSYNC_SRC="$SRC_SCOPE/"
 RSYNC_DEST="$DEST_SCOPE/"
 
-RSYNC_FLAGS="-av --checksum --include='*/' --include='*.jpg' --exclude='*'"
+# Use an array so the include/exclude globs survive without being mangled by
+# word-splitting (a quoted-string form leaves literal quotes in the patterns,
+# which silently disables the filters and copies logs/pid/etc. into public/).
+# Exclude dashboard-scene brands (scene-*) — those are handled separately by
+# 06-sync-scenes-to-website.sh, which remaps them into public/scenes/.
+RSYNC_FLAGS=(-av --checksum --exclude='scene-*/' --include='*/' --include='*.jpg' --exclude='*')
 if $DRY_RUN; then
-    RSYNC_FLAGS="$RSYNC_FLAGS --dry-run"
+    RSYNC_FLAGS+=(--dry-run)
     echo "(dry-run mode — no files will be written)"
     echo ""
 fi
 
-# shellcheck disable=SC2086
-rsync $RSYNC_FLAGS "$RSYNC_SRC" "$RSYNC_DEST"
+rsync "${RSYNC_FLAGS[@]}" "$RSYNC_SRC" "$RSYNC_DEST"
 
 if ! $DRY_RUN; then
     COPIED=$(find "$DEST" -name "*.jpg" | wc -l | tr -d ' ')

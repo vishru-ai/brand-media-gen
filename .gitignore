@@ -12,3 +12,5 @@ __pycache__/
 # Kernel/process core dumps (e.g. from GPU hangs) — large, never commit
 core
 core.*
+
+.DS_Store

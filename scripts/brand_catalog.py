@@ -510,4 +510,91 @@ BRANDS = [
             },
         ],
     },
+
+    # ─────────────────────────────────────────────────────────────────────
+    # Dashboard scenes — photo slots for the website's "Use cases" section
+    # (app/components/DashboardShowcase.tsx). Each product slug maps 1:1 to a
+    # slot id; generated `hero` images are synced to the website at
+    # public/scenes/<vertical>/<slot>.jpg by scripts/06-sync-scenes-to-website.sh
+    # (the "scene-" prefix becomes the <vertical> folder). Only `hero` is
+    # generated for these. "scene": True is metadata; the generator ignores it.
+    # ─────────────────────────────────────────────────────────────────────
+    {
+        "slug": "scene-coffee", "scene": True,
+        "name": "Coffee Shop Menu",
+        "style": "warm specialty coffee shop photography, soft natural window light, cozy artisanal cafe aesthetic, shallow depth of field",
+        "negative": "people, text, logo, watermark, cartoon, illustration, low quality, blurry",
+        "products": [
+            {"slug": "flat-white", "name": "Flat White",  "formats": {"hero": "a flat white coffee in a white ceramic cup with delicate latte art on a wooden cafe counter, soft morning light"}},
+            {"slug": "cortado",    "name": "Cortado",     "formats": {"hero": "a cortado in a small clear glass on a marble cafe table, visible espresso and steamed milk layers, soft light"}},
+            {"slug": "cold-brew",  "name": "Cold Brew",   "formats": {"hero": "a tall glass of iced cold brew coffee with ice cubes on a cafe counter, condensation droplets, bright daylight"}},
+            {"slug": "matcha",     "name": "Matcha Latte","formats": {"hero": "a vivid green matcha latte in a glass cup with oat milk on a wooden table, soft natural light"}},
+            {"slug": "seasonal",   "name": "Seasonal",    "formats": {"hero": "a maple pecan latte in a cozy cafe with autumn decor, cinnamon sticks and pecans beside the cup, warm seasonal mood"}},
+        ],
+    },
+    {
+        "slug": "scene-dining", "scene": True,
+        "name": "Restaurant Menu",
+        "style": "fine dining food photography, moody warm restaurant lighting, elegant plating, shallow depth of field",
+        "negative": "people, text, logo, watermark, cartoon, illustration, low quality, blurry",
+        "products": [
+            {"slug": "branzino", "name": "Whole Branzino",   "formats": {"hero": "a beautifully plated whole roasted branzino fish with charred lemon and salsa verde on a ceramic plate, fine dining presentation"}},
+            {"slug": "rigatoni", "name": "Rigatoni al Ragu", "formats": {"hero": "rigatoni pasta with rich slow-braised short rib ragu in a shallow bowl, shaved parmesan, restaurant food photography"}},
+            {"slug": "burrata",  "name": "Burrata & Peach",  "formats": {"hero": "fresh creamy burrata with sliced peaches, basil oil and aged balsamic on a plate, elegant summer appetizer"}},
+        ],
+    },
+    {
+        "slug": "scene-gym", "scene": True,
+        "name": "Gym & Studio",
+        "style": "modern fitness studio photography, dynamic energetic lighting, premium gym interior",
+        "negative": "text, logo, watermark, cartoon, illustration, low quality, blurry, distorted faces",
+        "products": [
+            {"slug": "studio", "name": "Studio", "formats": {"hero": "a bright modern group fitness studio mid-class, people on yoga mats, large windows, warm energetic atmosphere"}},
+        ],
+    },
+    {
+        "slug": "scene-hospital", "scene": True,
+        "name": "Hospital",
+        "style": "clean modern hospital interior photography, bright welcoming healthcare environment, calm and professional",
+        "negative": "text, logo, watermark, cartoon, illustration, low quality, blurry, distorted faces",
+        "products": [
+            {"slug": "lobby", "name": "Main Concourse", "formats": {"hero": "a bright modern hospital main concourse lobby with a reception desk, glass walls and plants, calm welcoming atmosphere"}},
+        ],
+    },
+    {
+        "slug": "scene-school", "scene": True,
+        "name": "School",
+        "style": "bright welcoming school campus photography, optimistic daylight, clean composition",
+        "negative": "text, logo, watermark, cartoon, illustration, low quality, blurry, distorted faces",
+        "products": [
+            {"slug": "campus", "name": "Campus", "formats": {"hero": "a modern high school campus exterior on a sunny day, brick buildings, green lawn and a welcoming main entrance"}},
+        ],
+    },
+    {
+        "slug": "scene-factory", "scene": True,
+        "name": "Manufacturing",
+        "style": "clean modern manufacturing facility photography, organized industrial environment, bright even lighting",
+        "negative": "people, text, logo, watermark, cartoon, illustration, low quality, blurry, cluttered, rust",
+        "products": [
+            {"slug": "floor", "name": "Plant Floor", "formats": {"hero": "a clean organized modern factory assembly floor with robotic arms and conveyor lines, bright industrial lighting, deep perspective"}},
+        ],
+    },
+    {
+        "slug": "scene-retail", "scene": True,
+        "name": "Retail & Malls",
+        "style": "premium retail and shopping mall photography, bright upscale commercial interior",
+        "negative": "readable text, logo, watermark, cartoon, illustration, low quality, blurry",
+        "products": [
+            {"slug": "promo", "name": "Storefront Promo", "formats": {"hero": "an upscale shopping mall storefront with a bright spring sale display window, polished floors, modern retail interior"}},
+        ],
+    },
+    {
+        "slug": "scene-airport", "scene": True,
+        "name": "Airport",
+        "style": "modern airport terminal photography, bright spacious architecture, calm travel atmosphere",
+        "negative": "text, logo, watermark, cartoon, illustration, low quality, blurry, distorted faces",
+        "products": [
+            {"slug": "concourse", "name": "Concourse", "formats": {"hero": "a spacious modern airport concourse with a few travelers, large windows, departure gates and bright daylight"}},
+        ],
+    },
 ]

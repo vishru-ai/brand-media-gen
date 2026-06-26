@@ -94,6 +94,56 @@ check_reachable() {
     fi
 }
 
+ensure_tmux() {
+    # tmux is what lets the run survive SSH disconnects. Install it if missing.
+    if ssh_run "command -v tmux >/dev/null 2>&1"; then
+        return 0
+    fi
+    echo "tmux is not installed on ${HOST}. Installing it (needs sudo)..."
+    if ! ssh_tty "sudo apt-get update -qq && sudo apt-get install -y tmux"; then
+        echo "ERROR: could not install tmux on ${HOST}." >&2
+        echo "Install it manually:  ssh ${HOST} 'sudo apt-get install -y tmux'" >&2
+        exit 1
+    fi
+}
+
+print_sudoers_setup() {
+    # Print the one-liner that grants passwordless sudo for EVERY privileged command
+    # this script runs unattended (detached tmux, no TTY):
+    #   - systemctl isolate multi-user.target / graphical.target  (GPU display free+restore)
+    #   - perf-mode.sh                                            (CPU governor boost, both modes)
+    # perf-mode.sh's path is resolved on the box so the rule is exact; it's omitted
+    # if perf-mode isn't installed yet.
+    local perf_path rule
+    perf_path=$(ssh_run "command -v perf-mode.sh 2>/dev/null" || true)
+    rule="${REMOTE_USER} ALL=(root) NOPASSWD: /usr/bin/systemctl isolate multi-user.target, /usr/bin/systemctl isolate graphical.target"
+    [[ -n "$perf_path" ]] && rule="${rule}, ${perf_path}"
+    echo "Set up passwordless sudo once on the box (covers all privileged commands):" >&2
+    echo "  ssh ${HOST} 'echo \"${rule}\" | sudo tee /etc/sudoers.d/vishru-gen >/dev/null && sudo chmod 0440 /etc/sudoers.d/vishru-gen'" >&2
+}
+
+check_gpu_sudo() {
+    # GPU mode runs 'sudo systemctl isolate' inside a detached tmux (no TTY), so it
+    # cannot answer a password prompt. Verify passwordless sudo is set up for BOTH
+    # isolate commands first — otherwise the run hangs at 'Freeing display engine'
+    # waiting for a password it can never receive. 'sudo -n -l <cmd>' tests the
+    # specific NOPASSWD entry without prompting and without executing anything.
+    # (perf-mode.sh is best-effort and not gated here — it self-skips if missing.)
+    if ssh_run "sudo -n -l systemctl isolate multi-user.target >/dev/null 2>&1 && \
+                sudo -n -l systemctl isolate graphical.target >/dev/null 2>&1"; then
+        return 0
+    fi
+    echo "ERROR: GPU mode needs passwordless sudo for 'systemctl isolate' on ${HOST}," >&2
+    echo "       but it isn't set up. The run would hang at 'Freeing display engine'" >&2
+    echo "       waiting for a password it can't receive (detached tmux has no TTY)." >&2
+    echo "" >&2
+    print_sudoers_setup
+    echo "" >&2
+    echo "Or run on CPU instead (desktop stays up, no isolate needed):" >&2
+    echo "  $0 ${HOST_ARG} --cpu" >&2
+    exit 1
+}
+
 # ── Status mode ────────────────────────────────────────────────────────────────
 if [[ "$MODE" == "status" ]]; then
     check_reachable
@@ -144,6 +194,8 @@ fi
 
 # ── Run mode ───────────────────────────────────────────────────────────────────
 check_reachable
+ensure_tmux
+[[ "$BATCH_MODE" == "gpu" ]] && check_gpu_sudo
 
 # Check if a session is already running
 SESSION_ALIVE=$(ssh_run "tmux has-session -t '${TMUX_SESSION}' 2>/dev/null && echo yes || echo no")
@@ -160,7 +212,7 @@ fi
 
 # Quote gen args so they survive the remote shell
 QUOTED_ARGS=""
-for a in "${GEN_ARGS[@]}"; do
+for a in "${GEN_ARGS[@]+"${GEN_ARGS[@]}"}"; do
     QUOTED_ARGS+=" $(printf '%q' "$a")"
 done
 
@@ -203,10 +255,12 @@ echo 'Time  : \$(date)'
 echo ''
 
 # Boost CPU if perf-mode is installed (set by 00-presetup.sh). Helps both modes
-# (CPU inference, and the CPU-side offload work during GPU runs).
+# (CPU inference, and the CPU-side offload work during GPU runs). Best-effort:
+# use 'sudo -n' so it fails fast if passwordless sudo isn't set up, rather than
+# hanging on a password prompt this detached tmux (no TTY) can never answer.
 if command -v perf-mode.sh >/dev/null 2>&1; then
-    echo 'Setting CPU to performance governor...'
-    sudo perf-mode.sh 2>/dev/null || true
+    echo 'Setting CPU to performance governor (best-effort)...'
+    sudo -n perf-mode.sh 2>/dev/null || echo '  (skipped — add perf-mode.sh to /etc/sudoers.d/vishru-gen for passwordless sudo; continuing)'
 fi
 
 ${RUN_INVOCATION}
@@ -231,10 +285,9 @@ echo "Mode    : ${BATCH_MODE}$([[ "$BATCH_MODE" == gpu ]] && echo '  (desktop fr
 echo "Args    :${QUOTED_ARGS:-  (none — full run)}"
 echo ""
 if [[ "$BATCH_MODE" == "gpu" ]]; then
-    echo "NOTE: GPU mode runs 'sudo systemctl isolate' in a detached tmux (no TTY),"
-    echo "      so it needs passwordless sudo for that command. If the run fails at"
-    echo "      'Freeing display engine', add this once on the box:"
-    echo "  echo \"${REMOTE_USER} ALL=(root) NOPASSWD: /usr/bin/systemctl isolate multi-user.target, /usr/bin/systemctl isolate graphical.target\" | sudo tee /etc/sudoers.d/gpu-remote-isolate"
+    # Passwordless sudo was already verified by check_gpu_sudo above.
+    echo "NOTE: GPU mode frees the display engine via 'sudo systemctl isolate'"
+    echo "      (passwordless sudo verified). The desktop goes DOWN during the run."
     echo ""
 fi
 echo "Starting tmux session on remote box..."

@@ -31,6 +31,7 @@ output/brands/{brand-slug}/{product-slug}--{format}.jpg
 """
 
 import argparse
+import gc
 import json
 import os
 import sys
@@ -144,11 +145,29 @@ def build_prompt(brand: dict, product: dict, fmt_name: str) -> str:
     return f"{product['formats'][fmt_name]}, {brand['style']}"
 
 
+def _round16(x: float) -> int:
+    """Round to the nearest multiple of 16 (>=16). Pipelines reject odd sizes:
+    SDXL errors on non-/8 dims, FLUX warns and resizes on non-/16. 16 satisfies
+    both. The final image is resized back to the exact catalog spec on save."""
+    return max(16, round(x / 16) * 16)
+
+
 def target_dims(fmt_name: str, draft: bool) -> tuple[int, int]:
     d = FORMATS[fmt_name]
+    w, h = d["width"], d["height"]
     if draft:
-        return int(d["width"] * DRAFT_SCALE), int(d["height"] * DRAFT_SCALE)
-    return d["width"], d["height"]
+        w, h = w * DRAFT_SCALE, h * DRAFT_SCALE
+    return _round16(w), _round16(h)
+
+
+def _is_blank(img) -> bool:
+    """True if the image is (near-)flat — the telltale of a NaN/inf decode cast to
+    uint8, which lands as an almost-entirely-black frame (sometimes with a few stray
+    edge pixels, so an exact min==max test misses it). Uses luminance std-dev: real
+    renders — even dark ones with a bright subject — have std-dev well above this;
+    a NaN frame is ~0."""
+    from PIL import ImageStat
+    return ImageStat.Stat(img.convert("L")).stddev[0] < 5.0
 
 
 # ── Dry-run printer ────────────────────────────────────────────────────────────
@@ -227,7 +246,10 @@ def run(args: argparse.Namespace) -> None:
 
     device       = resolve_device(args.device)
     torch_dtype  = resolve_dtype(args.dtype, device, model_name)
-    low_vram_on  = (device == "cuda") if args.lowvram == "auto" else (args.lowvram == "on")
+    # 'auto' keeps the model resident (no offload). CPU-offload migrates modules
+    # through the SVM path and wedges the 780M's MES scheduler — offload is opt-in
+    # via --lowvram on. Slicing still applies, so peak memory stays bounded.
+    low_vram_on  = (args.lowvram == "on")
 
     d             = DEFAULTS[model_name]
     steps         = args.steps          if args.steps > 0    else d["steps"]
@@ -282,11 +304,22 @@ def run(args: argparse.Namespace) -> None:
         result = pipe(**kwargs)
         img = result.images[0]
 
-        # If generated at draft resolution, upscale to target before saving so
-        # the files land at the correct pixel dimensions.
-        if args.draft:
-            full_w, full_h = FORMATS[fmt_name]["width"], FORMATS[fmt_name]["height"]
-            img = img.resize((full_w, full_h), PILImage.LANCZOS)
+        # A blank frame means a NaN/inf decode (cold-start MIOpen autotune on the
+        # iGPU). Retry up to twice with now-warmed kernels before giving up.
+        retries = 0
+        while _is_blank(img) and retries < 2:
+            retries += 1
+            print(f"  ⚠ blank/NaN image — retrying ({retries}/2)…")
+            img = pipe(**kwargs).images[0]
+        if _is_blank(img):
+            print("  ⚠ still blank after retries — saving anyway; inspect this one.")
+
+        # Deliver the exact catalog spec dimensions. Generation runs at the
+        # nearest multiple of 16 (and at draft scale), so resize to spec on save
+        # — covers both draft upscaling and the /16 rounding.
+        spec_w, spec_h = FORMATS[fmt_name]["width"], FORMATS[fmt_name]["height"]
+        if img.size != (spec_w, spec_h):
+            img = img.resize((spec_w, spec_h), PILImage.LANCZOS)
 
         img.save(str(path), "JPEG", quality=92, optimize=True)
 
@@ -298,6 +331,15 @@ def run(args: argparse.Namespace) -> None:
               f"(session {total_elapsed/60:.1f}m, ~{remaining/60:.0f}m remaining)\n")
 
         _write_progress(i, total, last_label, t_session)
+
+        # Free per-image buffers and return cached blocks to the driver. On the
+        # 780M iGPU, allocator fragmentation accumulating across images eventually
+        # trips the SVM/MES path and hangs the GPU ("GPU Hang" at step 0 of a later
+        # image); clearing the cache each image keeps memory from creeping up.
+        del result, img
+        if device == "cuda":
+            torch.cuda.empty_cache()
+        gc.collect()
 
     _write_progress(total, total, "COMPLETE", t_session)
     print(f"Done. {total} image(s) saved to {OUTPUT_DIR / model_name}")
@@ -343,7 +385,8 @@ def main() -> None:
     parser.add_argument(
         "--model", "-m", default="flux-schnell-q4",
         choices=["flux-schnell-q4", "sdxl"],
-        help="Which model to use (default: flux-schnell-q4).",
+        help="Which model to use (default: flux-schnell-q4). The 780M GPU can't "
+             "run either model (MES firmware hang) — run with --cpu.",
     )
     parser.add_argument(
         "--steps", "-s", type=int, default=0,
@@ -362,12 +405,16 @@ def main() -> None:
         help="Compute device. 'auto' picks GPU if available, else CPU.",
     )
     parser.add_argument(
-        "--dtype", default="auto", choices=["auto", "fp16", "fp32", "bf16"],
-        help="Tensor precision. 'auto' = fp16 on GPU, fp32 on CPU, bf16 for FLUX.",
+        "--dtype", default="fp32", choices=["auto", "fp16", "fp32", "bf16"],
+        help="Tensor precision (default fp32 — most stable on CPU, the only "
+             "working backend on this box). 'auto' = fp16 on GPU, fp32 on CPU, "
+             "bf16 for FLUX.",
     )
     parser.add_argument(
         "--lowvram", default="auto", choices=["auto", "on", "off"],
-        help="CPU offload + attention/VAE slicing. 'auto' = on for GPU.",
+        help="CPU model-offload. 'auto'/'off' keep the model resident (best on "
+             "this unified-memory APU); 'on' enables offload. Slicing applies "
+             "either way.",
     )
     parser.add_argument(
         "--log-file", type=Path, default=None, metavar="PATH",

@@ -54,12 +54,24 @@ def _finalize(pipe, device: str, low_vram: bool):
     else:
         pipe = pipe.to(device)
 
-    for fn in ("enable_attention_slicing", "enable_vae_slicing", "enable_vae_tiling"):
-        if hasattr(pipe, fn):
-            try:
-                getattr(pipe, fn)()
-            except Exception:
-                pass
+    # Attention slicing on the pipeline (UNet). For VAE slicing+tiling, call the
+    # vae-level API directly — the pipe-level enable_vae_*() methods are deprecated
+    # and may NOT propagate to the VAE, leaving VAE decode to OOM at high resolution
+    # (the big upsampling conv allocates several GB). Tiling decodes in patches and
+    # is what makes 1344px-class images fit on the 16GB iGPU.
+    if hasattr(pipe, "enable_attention_slicing"):
+        try:
+            pipe.enable_attention_slicing()
+        except Exception:
+            pass
+    vae = getattr(pipe, "vae", None)
+    if vae is not None:
+        for fn in ("enable_slicing", "enable_tiling"):
+            if hasattr(vae, fn):
+                try:
+                    getattr(vae, fn)()
+                except Exception:
+                    pass
     return pipe
 
 
@@ -95,6 +107,22 @@ def load_sdxl(model_path: Path, device: str, dtype, low_vram: bool):
         torch_dtype=dtype,
         use_safetensors=True,
     )
+    # SDXL's stock VAE is numerically unstable in fp16, so the pipeline upcasts it
+    # to fp32 for the decode — doubling VAE memory and OOMing the final decode at
+    # full resolution on the 16GB iGPU. The fp16-fix VAE (force_upcast=False) decodes
+    # stably without the upcast: half the peak, no quality loss. Use it for any
+    # half-precision run (fp16 or bf16); fp32 keeps the stock VAE. Note: prefer bf16
+    # for generation — fp16 can overflow to NaN (blank frame) on some prompts/seeds;
+    # bf16 has fp32's range and doesn't. Falls back gracefully if it can't be fetched.
+    if dtype in (torch.float16, torch.bfloat16):
+        from diffusers import AutoencoderKL
+        try:
+            pipe.vae = AutoencoderKL.from_pretrained(
+                "madebyollin/sdxl-vae-fp16-fix", torch_dtype=dtype
+            )
+        except Exception as e:
+            print(f"warning: could not load fp16-fix VAE ({e}); using stock VAE "
+                  f"(will upcast to fp32 and may OOM at full resolution).")
     return _finalize(pipe, device, low_vram)
 
 
@@ -126,8 +154,11 @@ def generate(
 ):
     device = resolve_device(device)
     torch_dtype = resolve_dtype(dtype, device, model_name)
-    # On the iGPU, memory savers default ON (shared RAM); on CPU they're off.
-    low_vram_on = (device == "cuda") if low_vram == "auto" else (low_vram == "on")
+    # 'auto' keeps the model resident (no offload). On this unified-memory APU
+    # (Radeon 780M) enable_model_cpu_offload() migrates modules through the SVM
+    # path and wedges the GPU — offload is opt-in via --lowvram on. Attention/VAE
+    # slicing still applies regardless, so peak memory stays bounded.
+    low_vram_on = (low_vram == "on")
     model_path = MODELS_DIR / model_name
     if not model_path.exists():
         print(f"ERROR: Model not found at {model_path}")
@@ -214,8 +245,10 @@ def main():
         help="Compute device. 'auto' uses the GPU (incl. ROCm) if available, else CPU.",
     )
     parser.add_argument(
-        "--dtype", default="auto", choices=["auto", "fp16", "fp32", "bf16"],
-        help="Tensor precision. 'auto' = fp16 on GPU, fp32 on CPU (FLUX uses bf16).",
+        "--dtype", default="fp32", choices=["auto", "fp16", "fp32", "bf16"],
+        help="Tensor precision (default fp32 — most stable on CPU, which is the "
+             "only working backend on this box). 'auto' = fp16 on GPU, fp32 on "
+             "CPU, bf16 for FLUX.",
     )
     parser.add_argument(
         "--lowvram", default="auto", choices=["auto", "on", "off"],

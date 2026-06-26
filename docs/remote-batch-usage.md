@@ -22,8 +22,15 @@ For the batch, always use `05-gen-remote-batch.sh`.
 2. **Models are downloaded on the box.** `bash scripts/02-download-models.sh flux-schnell-q4`
 3. **FLUX access (if using FLUX).** The box needs `.env` with a Hugging Face token
    and the account must have accepted the FLUX.1-schnell license. SDXL needs no token.
-4. **For GPU mode — passwordless sudo for display switching** (see
-   [GPU mode notes](#gpu-mode-the-desktop-goes-down)).
+4. **Passwordless sudo for the unattended commands.** The run executes a few
+   privileged commands inside a detached tmux (no terminal to type a password):
+   `systemctl isolate` (GPU display free/restore) and `perf-mode.sh` (CPU governor
+   boost, both modes). Grant them once with a single sudoers file — see
+   [GPU mode notes](#gpu-mode-the-desktop-goes-down). The GPU run **refuses to
+   start** until the isolate rules are in place; `perf-mode.sh` is best-effort and
+   simply skipped if it's missing.
+5. **tmux is auto-installed.** If the box doesn't have `tmux`, the runner installs
+   it for you on first run (prompts once for your sudo password over SSH).
 
 ---
 
@@ -187,15 +194,27 @@ hangs the display. The desktop is **restored automatically** when generation
 finishes (or if the session crashes/is killed, via a trap).
 
 Because the run happens in a **detached tmux** (no terminal to type a sudo
-password), GPU mode needs passwordless sudo for the two isolate commands. Add
-this **once on the box**:
+password), the unattended commands need passwordless sudo. Set up **one** sudoers
+file on the box that covers all of them — the two isolate commands **and**
+`perf-mode.sh` (the CPU governor boost, used in both GPU and CPU mode):
 
 ```bash
-echo "panamorphic ALL=(root) NOPASSWD: /usr/bin/systemctl isolate multi-user.target, /usr/bin/systemctl isolate graphical.target" | sudo tee /etc/sudoers.d/gpu-remote-isolate
+# Run from your laptop. Resolves perf-mode.sh's real path on the box.
+ssh panamorphic@10.0.0.208 'P=$(command -v perf-mode.sh); \
+  echo "panamorphic ALL=(root) NOPASSWD: /usr/bin/systemctl isolate multi-user.target, /usr/bin/systemctl isolate graphical.target${P:+, $P}" \
+  | sudo tee /etc/sudoers.d/vishru-gen >/dev/null && sudo chmod 0440 /etc/sudoers.d/vishru-gen'
 ```
 
-If you skip this, a GPU run fails cleanly at "Freeing display engine" and the
-desktop is never taken down. Use `--cpu` to avoid the requirement entirely.
+The runner **preflights** this before a GPU run: if the isolate rules are missing
+it exits immediately (before taking the desktop down) and prints this exact
+command for you. So a GPU run can no longer hang waiting for a password. Use
+`--cpu` to skip the isolate requirement entirely.
+
+> `perf-mode.sh` is best-effort: if it's not in the sudoers rule the run prints a
+> one-line "skipped" notice and continues at the default CPU governor.
+>
+> If you set up the older `/etc/sudoers.d/gpu-remote-isolate` file previously, you
+> can `sudo rm` it — `vishru-gen` supersedes it (harmless to leave either way).
 
 ---
 
@@ -234,7 +253,10 @@ bash scripts/04-copy-to-website.sh --model sdxl --brand vantara
 | Symptom | Likely cause / fix |
 |---------|--------------------|
 | `cannot reach <host>` | Wrong IP, different network, or SSH not set up. Test `ssh panamorphic@<ip>`. |
-| Stalls at "Freeing display engine" | Missing the NOPASSWD sudoers rule (GPU mode). Add it, or use `--cpu`. |
+| `tmux: command not found` | Older builds didn't auto-install tmux. Update the script (it now installs it), or `ssh <host> 'sudo apt-get install -y tmux'`. |
+| GPU run refuses to start, asks for the sudoers rule | The isolate NOPASSWD rules aren't set up. Run the printed one-liner (see [GPU mode notes](#gpu-mode-the-desktop-goes-down)), or use `--cpu`. |
+| Stalls at "Freeing display engine" | Old behavior before the preflight. Update the script; then add the sudoers rule or use `--cpu`. |
+| "Setting CPU to performance governor … skipped" | `perf-mode.sh` isn't in the sudoers rule. Harmless (runs at default governor). Add it to `/etc/sudoers.d/vishru-gen` to enable. |
 | `Cannot access gated repo … FLUX.1-schnell` | Box needs `.env` HF token + accepted license, or use `--model sdxl`. |
 | Runs on CPU when you wanted GPU | You passed `--cpu`, or the container couldn't see the GPU. Check `./scripts/run-rocm.sh python -c "import torch; print(torch.cuda.is_available())"` on the box. |
 | Out-of-memory / GPU hang on big formats | LED is 2560×720 — heavy on shared iGPU RAM. Try `--draft`, or generate `--format led` separately. |
