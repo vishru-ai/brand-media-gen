@@ -72,6 +72,21 @@ def _finalize(pipe, device: str, low_vram: bool):
                     getattr(vae, fn)()
                 except Exception:
                     pass
+        # Force SMALL VAE tiles. Tiling alone isn't enough on the 780M: the default
+        # tile is still a large conv, and at full resolution the iGPU watchdog kills
+        # it ("GPU Hang" right after the last denoise step — seen with the FLUX VAE).
+        # Shrinking the tile makes each decode kernel short enough to finish. Only
+        # ever shrink (min()), so SDXL's already-working VAE is unaffected. Recompute
+        # the matching latent-space tile size from the VAE's downsample factor.
+        try:
+            if hasattr(vae, "tile_sample_min_size"):
+                vae.tile_sample_min_size = min(int(vae.tile_sample_min_size), 256)
+                n_blocks = len(getattr(vae.config, "block_out_channels", [0, 0, 0, 0]))
+                downscale = 2 ** (n_blocks - 1)
+                if hasattr(vae, "tile_latent_min_size"):
+                    vae.tile_latent_min_size = max(1, vae.tile_sample_min_size // downscale)
+        except Exception:
+            pass
     return pipe
 
 

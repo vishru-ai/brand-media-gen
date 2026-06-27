@@ -44,18 +44,28 @@ PYTORCH_HIP_ALLOC_CONF=expandable_segments:True,garbage_collection_threshold:0.8
 ```
 
 ### 4. Model + generation
-- **Use SDXL, not FLUX.** FLUX (T5-XXL ~9.5 GB + transformer ~6 GB) does not fit
-  in 16 GB VRAM — it OOMs (`HIPBLAS_STATUS_ALLOC_FAILED`) during T5 encoding. SDXL
-  (~6.5 GB, CLIP encoders, no T5) fits comfortably.
-- **`--dtype fp16`** for speed (~5 s/it, ~114 s/image full-res). Keep the model
-  **resident** (`--lowvram off`/`auto`) — CPU-offload migrates through the SVM path
-  and reintroduces hangs on this unified-memory APU.
+- **SDXL is the default/recommended model** (~6.5 GB, CLIP encoders, no T5; fast):
+  `--dtype fp16`, ~5 s/it, ~114 s/image full-res.
+- **FLUX also works now**, but needs more memory and is slower:
+  - It does NOT fit in a 16 GB-VRAM layout (OOMs with `HIPBLAS_STATUS_ALLOC_FAILED`
+    on T5). Set **BIOS UMA → Auto** (small ~1 GB VRAM) + **`ttm.pages_limit` for
+    24 GB** so PyTorch sees ~24 GB; FLUX's T5-XXL (~9.5 GB) + transformer (~6 GB)
+    then fits in GTT.
+  - Run with **`--dtype bf16`** (fp32 ~28 GB won't fit; fp16 risks NaN).
+  - **~35 s/step → ~148 s/image** (12B transformer; ~2.5× SDXL). Only 4 steps, but
+    each is heavy. Quality edge (prompt-adherence/faces) is modest for the Q4 schnell
+    build — use it when that matters, else SDXL is faster.
+- Keep the model **resident** (`--lowvram off`/`auto`) — CPU-offload migrates through
+  the SVM path and reintroduces hangs on this unified-memory APU.
 - **fp16-fix VAE** (`madebyollin/sdxl-vae-fp16-fix`, auto-loaded for fp16/bf16 in
   `load_sdxl`): SDXL's stock VAE upcasts to fp32 for decode, which **OOMs the VAE
   decode** at full res. The fp16-fix VAE decodes in fp16 (no upcast, half the peak).
-- **VAE tiling + slicing** must be enabled via the **vae-level** API
-  (`pipe.vae.enable_tiling()`), not the deprecated pipe-level call — otherwise it
-  silently doesn't engage and the VAE decode OOMs.
+- **VAE tiling + slicing + SMALL tiles** (`_finalize`): enable via the **vae-level**
+  API (`pipe.vae.enable_tiling()`), not the deprecated pipe-level call, AND shrink
+  `tile_sample_min_size` to **256**. Tiling alone isn't enough — the default tile is
+  still a large conv, and the FLUX VAE decode at full res hits the iGPU watchdog
+  (`GPU Hang` right after the last denoise step). 256px tiles keep each decode kernel
+  short enough to finish. (Only shrinks the tile, so SDXL's working VAE is unaffected.)
 - **Blank/NaN retry**: fp16 can overflow to NaN on some prompts/seeds → an
   all-black frame. `generate_all_brands.py` detects near-blank output (luminance
   std-dev) and retries with a fresh seed. `bf16` avoids the overflow entirely but
@@ -110,7 +120,7 @@ kernel compilation per image size.
 | `--lowvram on` (CPU offload) | actively *worse* — model migration thrashes SVM on APU |
 | Kernel 7.0 + latest `linux-firmware` | already current; MES bug persists |
 | BIOS UMA 16 GB + ReBAR (before cwsr fix) | no effect on the hang |
-| FLUX instead of SDXL | doesn't fit 16 GB VRAM (T5-XXL); OOMs on T5 |
+| FLUX on a 16 GB-VRAM layout | OOMs on T5 — needs BIOS UMA Auto + 24 GB GTT (then works, but ~2.5× slower than SDXL) |
 | bf16 as the batch default | stable but too slow on gfx1103 (use per-image only) |
 
 ### dmesg signature decoder
@@ -122,6 +132,8 @@ kernel compilation per image size.
 | `GPU Hang` at step 0 (first GEMM) | hipBLASLt on gfx1103 | `TORCH_BLAS_PREFER_HIPBLASLT=0` |
 | `amdgpu_ttm_tt_populate … page fault` | VRAM+GTT over-commit vs physical RAM | lower `ttm.pages_limit` or BIOS UMA |
 | `torch.OutOfMemoryError … VAE` | VAE fp32 upcast at full res | fp16-fix VAE + vae-level tiling |
+| `GPU Hang` immediately after the last denoise step | VAE decode conv too big for the iGPU watchdog (esp. FLUX) | shrink `tile_sample_min_size` to 256 |
+| `HIPBLAS_STATUS_ALLOC_FAILED` (in T5) | FLUX too big for available VRAM/GTT | BIOS UMA Auto + `ttm.pages_limit` 24 GB |
 | `invalid value encountered in cast` → blank image | fp16 NaN overflow | blank-retry / bf16 |
 
 ---
