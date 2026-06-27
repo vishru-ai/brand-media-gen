@@ -104,6 +104,7 @@ if ! $DRY_RUN; then
     COPIED=$(find "$DEST" -name "*.jpg" | wc -l | tr -d ' ')
     echo ""
     echo "Done. $COPIED file(s) now in $DEST"
+    echo "(BRANDS.md is synced separately — run scripts/sync-brands-doc.sh)"
     echo ""
     echo "Next: commit the new images to the website repo:"
     echo "  cd $WEBSITE_DIR"
