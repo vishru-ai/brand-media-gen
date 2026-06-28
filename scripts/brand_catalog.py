@@ -395,7 +395,7 @@ BRANDS = [
                     "hero":      "extreme close-up macro of a Swiss diver watch dial, blue rotating bezel, hands at ten and two, water droplets beaded on sapphire crystal, matte black background, precision luxury watch photography",
                     "tiktok":   "vertical 9:16, wrist-forward close-up of a luxury diver watch on a tanned wrist, rolled white shirt cuff, cobblestone street blurred behind, lifestyle watch photography",
                     "instagram": "luxury diver watch resting open in a midnight-blue velvet presentation box, single focused overhead beam of light, serif brand cartouche below the watch, luxury product photography",
-                    "led":       "ultra-wide 32:9, wrist shot of a Swiss diver watch against a sunlit tropical coral reef wall, turquoise water, rising bubbles, light caustics, underwater luxury watch advertising photography",
+                    "led":       "ultra-wide 32:9 cinematic panorama, a single luxury Swiss diver wristwatch with a deep-blue rotating bezel and steel bracelet, standing upright and centered on a wet black slate surface, dramatic raking rim light catching the polished case, smooth dark teal-to-black gradient background with vast empty negative space on both sides, crisp mirror reflection beneath the watch, a few water droplets on the sapphire crystal, premium hero product advertising photography",
                 },
             },
         ],
@@ -549,7 +549,7 @@ BRANDS = [
         "style": "modern fitness studio photography, dynamic energetic lighting, premium gym interior",
         "negative": "text, logo, watermark, cartoon, illustration, low quality, blurry, distorted faces",
         "products": [
-            {"slug": "studio", "name": "Studio", "formats": {"hero": "a bright modern group fitness studio mid-class, people on yoga mats, large windows, warm energetic atmosphere"}},
+            {"slug": "studio", "name": "Studio", "formats": {"hero": "a bright modern group fitness studio mid-class, people on yoga mats in lotus pose, large windows, warm energetic atmosphere"}},
         ],
     },
     {
@@ -558,7 +558,11 @@ BRANDS = [
         "style": "clean modern hospital interior photography, bright welcoming healthcare environment, calm and professional",
         "negative": "text, logo, watermark, cartoon, illustration, low quality, blurry, distorted faces",
         "products": [
-            {"slug": "lobby", "name": "Main Concourse", "formats": {"hero": "a bright modern hospital main concourse lobby with a reception desk, glass walls and plants, calm welcoming atmosphere"}},
+            {"slug": "lobby",      "name": "Main Concourse", "formats": {"hero": "a bright modern hospital main concourse lobby with a reception desk, glass walls and plants, calm welcoming atmosphere"}},
+            {"slug": "emergency",  "name": "Emergency",      "formats": {"hero": "a modern hospital emergency department interior, clean triage bay with medical monitors and a gurney, bright clinical lighting, calm and orderly"}},
+            {"slug": "radiology",  "name": "Radiology",      "formats": {"hero": "a hospital radiology imaging suite with a large CT/MRI scanner, spotless clinical room, soft blue ambient lighting"}},
+            {"slug": "cardiology", "name": "Cardiology",     "formats": {"hero": "a modern cardiology exam room with an exam table and heart-monitoring equipment, clean reassuring clinical interior, warm lighting"}},
+            {"slug": "pharmacy",   "name": "Pharmacy",       "formats": {"hero": "a hospital pharmacy with an organized counter and neat rows of medication shelves, bright clean clinical interior"}},
         ],
     },
     {
@@ -585,7 +589,11 @@ BRANDS = [
         "style": "premium retail and shopping mall photography, bright upscale commercial interior",
         "negative": "readable text, logo, watermark, cartoon, illustration, low quality, blurry",
         "products": [
-            {"slug": "promo", "name": "Storefront Promo", "formats": {"hero": "an upscale shopping mall storefront with a bright spring sale display window, polished floors, modern retail interior"}},
+            {"slug": "promo",     "name": "Storefront Promo", "formats": {"hero": "an upscale shopping mall storefront with a bright spring sale display window, polished floors, modern retail interior"}},
+            {"slug": "aldenwood", "name": "Aldenwood",        "formats": {"hero": "an upscale apparel boutique storefront in a shopping mall, neatly displayed clothing on racks, warm spotlighting, polished floor"}},
+            {"slug": "lumiere",   "name": "Lumiere",          "formats": {"hero": "a bright modern beauty and cosmetics store interior in a mall, glossy display counters, soft flattering lighting, elegant shelving"}},
+            {"slug": "forge-co",  "name": "Forge Co.",        "formats": {"hero": "a contemporary footwear and sneaker store in a mall, shoes displayed on backlit wall shelves, industrial-chic interior"}},
+            {"slug": "marlowe",   "name": "Marlowe",          "formats": {"hero": "a stylish home goods and furniture store interior in a mall, curated decor vignettes, warm ambient lighting"}},
         ],
     },
     {

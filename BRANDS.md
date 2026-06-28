@@ -141,7 +141,7 @@ All brand names, products, copy, and specs used across the website are fictional
 |-------|------|------------|
 | Diver Pro | Timepieces | 32:9 ultra-wide, minimalist surface or wrist shot |
 
-**Video/image ideas:** Close-up movement shots, underwater diving, minimalist studio, wrist shots on adventure
+**Video/image ideas:** Close-up movement shots, underwater diving with fingers open, minimalist studio, wrist shots on adventure
 
 ---
 

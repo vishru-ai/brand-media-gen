@@ -24,6 +24,8 @@ WEBSITE_DIR="$(dirname "$PROJECT_DIR")/website"
 DEST="$WEBSITE_DIR/public/scenes"
 
 # Least-preferred first so the preferred model is copied last and wins.
+# Preferred model = FLUX (matches website/app/lib/imagePrefs.ts MODEL_PREFERENCE),
+# so list it LAST here.
 MODELS=(sdxl flux-schnell-q4)
 # Preferred source format per slot, in order.
 FORMATS=(hero)
