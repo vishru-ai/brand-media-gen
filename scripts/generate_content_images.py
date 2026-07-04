@@ -3,15 +3,17 @@
 Image stage of the content pipeline: generate the illustration(s) for each text item
 and record their paths back into the content store.
 
+Default model is FLUX (flux-schnell-q4); pass --model sdxl for the IP-Adapter path.
+
 Two modes, chosen per type by content_types.py:
   * single (proverbs, facts, quotes, trivia, …) — one seed-locked illustration per item.
-  * story  — CHARACTER-CONSISTENT multi-image: an LLM plans a character bible + N scenes
-             (generate_image_plans.py, run as a subprocess so its memory frees first),
-             then SDXL renders a character reference and conditions every scene on it with
-             IP-Adapter, so the same character carries across all illustrations.
+  * story  — CHARACTER-CONSISTENT multi-image (LLM plans a character bible + N scenes via
+             generate_image_plans.py, a subprocess so its memory frees first). Consistency:
+               - FLUX (default): seed-lock + the character bible in every scene prompt.
+               - SDXL (--model sdxl): a character reference + IP-Adapter conditioning
+                 (h94/IP-Adapter, SDXL-only; auto-downloads on first story run).
 
-GPU only in practice (SDXL on the 780M via ROCm — run inside run-rocm.sh). IP-Adapter
-weights (h94/IP-Adapter) auto-download on first story run.
+GPU in practice (on the 780M via ROCm — run inside run-rocm.sh).
 
 ⚠ Images are generated for DRAFT content; entries stay review="pending". Gate with
 --review approved to only illustrate approved items.
@@ -84,16 +86,17 @@ def main() -> None:
     p.add_argument("--type", "-t", required=True, choices=list(SPECS))
     p.add_argument("--input", "-i", type=Path, default=None)
     p.add_argument("--group", "-g", nargs="+", default=None)
-    p.add_argument("--model", "-m", default="sdxl", choices=["sdxl"],
-                   help="Image model (SDXL — IP-Adapter runs on SDXL).")
+    p.add_argument("--model", "-m", default="flux-schnell-q4", choices=["flux-schnell-q4", "sdxl"],
+                   help="Image model. Default FLUX (best quality). SDXL enables the IP-Adapter "
+                        "story path; FLUX keeps stories consistent via seed-lock + character bible.")
     p.add_argument("--planner-model", default="qwen2.5-7b-instruct",
                    help="LLM used to plan story scenes.")
     p.add_argument("--scenes", type=int, default=3, help="Illustrations per story.")
-    p.add_argument("--steps", type=int, default=24)
+    p.add_argument("--steps", type=int, default=-1, help="Inference steps; -1 = model default.")
     p.add_argument("--width", type=int, default=768)
     p.add_argument("--height", type=int, default=768)
-    p.add_argument("--guidance", type=float, default=7.0)
-    p.add_argument("--ip-scale", type=float, default=0.6, help="IP-Adapter strength (story mode).")
+    p.add_argument("--guidance", type=float, default=-1.0, help="CFG scale; -1 = model default.")
+    p.add_argument("--ip-scale", type=float, default=0.6, help="IP-Adapter strength (SDXL story mode).")
     p.add_argument("--seed", type=int, default=-1, help="Base seed; -1 = derive per item from its id.")
     p.add_argument("--dtype", default="fp16", choices=["fp16", "bf16", "fp32"])
     p.add_argument("--device", "-d", default="cuda", choices=["auto", "cuda", "cpu"])
@@ -122,22 +125,27 @@ def main() -> None:
         store = cl.load_store(store_path)
         targets = collect_targets(store, groups, args.review, args.force)
 
-    # Load SDXL via the tuned loader (fp16-fix VAE, tiling/slicing, resident placement).
+    # Reuse the tuned image loaders (FLUX GGUF, or SDXL with the fp16-fix VAE + slicing).
     import torch
-    from generate_image import LOADERS, MODELS_DIR, resolve_device, resolve_dtype
+    from generate_image import LOADERS, DEFAULTS, MODELS_DIR, resolve_device, resolve_dtype
+
+    ip_capable = args.model == "sdxl"   # only SDXL has the h94 IP-Adapter
+    d = DEFAULTS[args.model]
+    steps = args.steps if args.steps > 0 else d["steps"]
+    guidance = args.guidance if args.guidance >= 0 else d["guidance_scale"]
 
     device = resolve_device(args.device)
     dtype = resolve_dtype(args.dtype, device, args.model)
-    # float16 has no CPU kernels in PyTorch — SDXL fp16 crashes on CPU. Force fp32.
+    # float16 has no CPU kernels in PyTorch — force fp32 on CPU.
     if device == "cpu" and dtype != torch.float32:
-        print("  (CPU: forcing fp32 — SDXL float16 can't run on CPU)", flush=True)
+        print("  (CPU: forcing fp32 — float16 can't run on CPU)", flush=True)
         dtype = torch.float32
     model_path = MODELS_DIR / args.model
     if not model_path.exists():
         print(f"ERROR: {args.model} not found at {model_path}. Run: bash scripts/02-download-models.sh {args.model}")
         sys.exit(1)
 
-    print(f"Loading {args.model} on {device} ({dtype})…", flush=True)
+    print(f"Loading {args.model} on {device} ({dtype}, {steps} steps)…", flush=True)
     t0 = time.monotonic()
     pipe = LOADERS[args.model](model_path, device, dtype, False)
     print(f"Ready in {time.monotonic() - t0:.0f}s.\n", flush=True)
@@ -147,8 +155,10 @@ def main() -> None:
 
     def render(prompt: str, seed: int, ref_image=None):
         gen = torch.Generator("cpu").manual_seed(seed)
-        kw = dict(prompt=prompt, negative_prompt=NEGATIVE, num_inference_steps=args.steps,
-                  guidance_scale=args.guidance, width=args.width, height=args.height, generator=gen)
+        kw = dict(prompt=prompt, num_inference_steps=steps, guidance_scale=guidance,
+                  width=args.width, height=args.height, generator=gen)
+        if args.model == "sdxl":
+            kw["negative_prompt"] = NEGATIVE   # FLUX schnell has no negative prompt / CFG
         if ref_image is not None:
             kw["ip_adapter_image"] = ref_image
         return pipe(**kw).images[0]
@@ -157,8 +167,12 @@ def main() -> None:
     # EVERY forward, so we can't render a plain character reference afterward. Render all
     # references FIRST (plain SDXL), THEN load IP-Adapter, then render each story's
     # scenes conditioned on its reference.
+    # SDXL story mode uses IP-Adapter, which — once loaded — requires an image on EVERY
+    # forward, so render all references FIRST, then load IP-Adapter, then scenes. FLUX
+    # has no such adapter: it keeps the character consistent via seed-lock + the character
+    # bible in every scene prompt (handled inline in the loop below), so skip this phase.
     refs = {}  # entry id -> (ref image, ref rel path)
-    if story_mode:
+    if story_mode and ip_capable:
         for g, e in targets:
             plan = e.get("image_plan") or {}
             character = str(plan.get("character", "")).strip()
@@ -196,18 +210,36 @@ def main() -> None:
         t_i = time.monotonic()
 
         if story_mode:
-            if e["id"] not in refs:
-                continue
-            ref_img, ref_rel = refs[e["id"]]
-            imgs.append(ref_rel)
-            character = str((e.get("image_plan") or {}).get("character", "")).strip()
-            scenes = (e.get("image_plan") or {}).get("scenes") or []
+            plan = e.get("image_plan") or {}
+            character = str(plan.get("character", "")).strip()
+            scenes = plan.get("scenes") or []
             style = spec.image_style
-            for i, scene in enumerate(scenes, 1):
-                img = render(f"{style}. {character}. Scene: {scene}", base_seed + i, ref_image=ref_img)
-                sp = out_dir / f"{e['id']}_{i}.jpg"
-                img.save(sp, quality=92)
-                imgs.append(str(cl.rel(sp)))
+            if not character or not scenes:
+                continue
+            if ip_capable:
+                # SDXL: reference (pre-rendered) + scenes conditioned on it via IP-Adapter.
+                if e["id"] not in refs:
+                    continue
+                ref_img, ref_rel = refs[e["id"]]
+                imgs.append(ref_rel)
+                for i, scene in enumerate(scenes, 1):
+                    img = render(f"{style}. {character}. Scene: {scene}", base_seed + i, ref_image=ref_img)
+                    sp = out_dir / f"{e['id']}_{i}.jpg"
+                    img.save(sp, quality=92)
+                    imgs.append(str(cl.rel(sp)))
+            else:
+                # FLUX: seed-lock — the SAME seed + the full character bible in every scene
+                # prompt keep the character consistent (FLUX's strong prompt adherence). A
+                # reference frame plus each scene, all at base_seed.
+                ref = render(f"{style}. Character reference, plain background: {character}", base_seed)
+                ref_path = out_dir / f"{e['id']}_ref.jpg"
+                ref.save(ref_path, quality=92)
+                imgs.append(str(cl.rel(ref_path)))
+                for i, scene in enumerate(scenes, 1):
+                    img = render(f"{style}. {character}. Scene: {scene}", base_seed)
+                    sp = out_dir / f"{e['id']}_{i}.jpg"
+                    img.save(sp, quality=92)
+                    imgs.append(str(cl.rel(sp)))
         else:
             subject = pick_subject(e)
             if not subject:

@@ -334,10 +334,15 @@ def test_generate_image_plans():
 
 def _stub_generate_image(tmp: Path):
     gi = types.ModuleType("generate_image")
-    (tmp / "models" / "sdxl").mkdir(parents=True, exist_ok=True)
+    for m in ("sdxl", "flux-schnell-q4"):
+        (tmp / "models" / m).mkdir(parents=True, exist_ok=True)
     gi.MODELS_DIR = tmp / "models"
     gi.resolve_device = lambda x: "cpu"
     gi.resolve_dtype = lambda *a, **k: "fp16"
+    gi.DEFAULTS = {
+        "sdxl": {"steps": 20, "guidance_scale": 7.5, "width": 768, "height": 768},
+        "flux-schnell-q4": {"steps": 4, "guidance_scale": 0.0, "width": 512, "height": 512},
+    }
     calls = []
 
     class _Img:
@@ -351,9 +356,9 @@ def _stub_generate_image(tmp: Path):
         def disable_attention_slicing(self): calls.append("noslice")
         def load_ip_adapter(self, *a, **k): calls.append("ip")
         def set_ip_adapter_scale(self, s): calls.append(("scale", s))
-        def __call__(self, **kw): calls.append("gen"); return _Res()
+        def __call__(self, **kw): calls.append(("gen", "ip" if kw.get("ip_adapter_image") else "plain")); return _Res()
 
-    gi.LOADERS = {"sdxl": lambda *a, **k: _Pipe()}
+    gi.LOADERS = {"sdxl": lambda *a, **k: _Pipe(), "flux-schnell-q4": lambda *a, **k: _Pipe()}
     sys.modules["generate_image"] = gi
     return calls
 
@@ -375,24 +380,40 @@ def test_generate_content_images_single():
         assert "ip" not in calls, "IP-Adapter should NOT load for single-image types"
 
 
-def test_generate_content_images_story_ipadapter():
+def _story_run(model):
     import content_lib as cl
     import generate_content_images as gci
-    with tempfile.TemporaryDirectory() as td:
-        tmp = Path(td)
-        calls = _stub_generate_image(tmp)
-        gci.IMAGE_ROOT = tmp / "images"
-        gci.subprocess = types.SimpleNamespace(run=lambda *a, **k: calls.append("planner"))
-        e = cl.finalize_entry({"title": "T", "text": "story", "mood": "warm"}, "band", "kids", "T story", "m")
-        e["image_plan"] = {"character": "Mika, 8", "scenes": ["s1", "s2", "s3"]}
-        store = make_store(tmp, "stories", {"kids": [e]})
-        _, log = run_main("generate_content_images",
-                          ["--type", "stories", "--input", str(store), "--scenes", "3", "--device", "cpu"])
-        got = json.loads(store.read_text())["kids"][0]
-        assert got.get("images") and len(got["images"]) == 4, f"expected ref+3 scenes, got {got.get('images')} (log:\n{log})"
-        assert "ip" in calls, "IP-Adapter must load for story mode"
-        assert "defattn" in calls and calls.index("defattn") < calls.index("ip"), \
-            "UNet attention processors must be reset before load_ip_adapter (SlicedAttnProcessor bug)"
+    tmp = Path(tempfile.mkdtemp())
+    calls = _stub_generate_image(tmp)
+    gci.IMAGE_ROOT = tmp / "images"
+    gci.subprocess = types.SimpleNamespace(run=lambda *a, **k: calls.append("planner"))
+    e = cl.finalize_entry({"title": "T", "text": "story", "mood": "warm"}, "band", "kids", "T story", "m")
+    e["image_plan"] = {"character": "Mika, 8", "scenes": ["s1", "s2", "s3"]}
+    store = make_store(tmp, "stories", {"kids": [e]})
+    argv = ["--type", "stories", "--input", str(store), "--scenes", "3", "--device", "cpu"]
+    if model:
+        argv += ["--model", model]
+    _, log = run_main("generate_content_images", argv)
+    got = json.loads(store.read_text())["kids"][0]
+    return got, calls, log
+
+
+def test_generate_content_images_story_sdxl_ipadapter():
+    got, calls, log = _story_run("sdxl")
+    assert got.get("images") and len(got["images"]) == 4, f"expected ref+3 scenes, got {got.get('images')} (log:\n{log})"
+    assert "ip" in calls, "IP-Adapter must load for SDXL story mode"
+    assert "defattn" in calls and calls.index("defattn") < calls.index("ip"), \
+        "UNet attention processors must be reset before load_ip_adapter (SlicedAttnProcessor bug)"
+    # every scene render must be IP-Adapter conditioned
+    assert ("gen", "ip") in calls, "SDXL scenes must pass ip_adapter_image"
+
+
+def test_generate_content_images_story_flux_seedlock():
+    got, calls, log = _story_run(None)  # default = flux-schnell-q4
+    assert got.get("images") and len(got["images"]) == 4, f"expected ref+3 scenes, got {got.get('images')} (log:\n{log})"
+    assert "ip" not in calls, "FLUX must NOT load IP-Adapter (SDXL-only)"
+    assert "defattn" not in calls, "FLUX must not touch attention processors"
+    assert ("gen", "ip") not in calls, "FLUX scenes must not pass ip_adapter_image (seed-lock)"
 
 
 # ── Runner ───────────────────────────────────────────────────────────────────────

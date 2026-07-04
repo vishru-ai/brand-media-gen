@@ -52,8 +52,8 @@ def main() -> None:
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     p.add_argument("prompts", help='Comma-separated prompts in quotes, e.g. "a, b, c"')
-    p.add_argument("--model", "-m", default="sdxl", choices=list(LOADERS.keys()),
-                   help="Model (default: sdxl — lighter/faster on CPU than FLUX).")
+    p.add_argument("--model", "-m", default="flux-schnell-q4", choices=list(LOADERS.keys()),
+                   help="Model (default: flux-schnell-q4).")
     p.add_argument("--device", "-d", default="cpu", choices=["auto", "cpu", "cuda"],
                    help="Compute device (default: cpu — keeps displays live, never hangs).")
     p.add_argument("--dtype", default="fp32", choices=["auto", "fp16", "fp32", "bf16"],
