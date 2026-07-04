@@ -46,7 +46,12 @@ apt-get install -y \
     libxrender1 \
     cmake \
     ninja-build \
-    openssh-server
+    openssh-server \
+    espeak-ng \
+    libsndfile1
+    #  ^ audio pipeline: espeak-ng backs the TTS voiceover fallback (generate_content_audio.py),
+    #    libsndfile1 backs the optional soundfile package. Baked in here so every fleet
+    #    machine has them at provisioning time (no per-machine install-remote --tts needed).
 
 # NOTE: git-lfs is intentionally NOT installed/initialized here. Models are
 # fetched via the Hugging Face CLI, not LFS, and running `git lfs install` under
