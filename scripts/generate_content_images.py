@@ -49,6 +49,11 @@ def pick_subject(entry: dict) -> str:
     return ""
 
 
+def scene_prompt(scene) -> str:
+    """A scene is {prompt, caption} (new) or a bare string (older plans)."""
+    return str(scene.get("prompt", "") if isinstance(scene, dict) else scene).strip()
+
+
 def collect_targets(store: dict, groups, review: str, force: bool):
     targets = []
     for g in groups:
@@ -91,7 +96,8 @@ def main() -> None:
                         "story path; FLUX keeps stories consistent via seed-lock + character bible.")
     p.add_argument("--planner-model", default="qwen2.5-7b-instruct",
                    help="LLM used to plan story scenes.")
-    p.add_argument("--scenes", type=int, default=3, help="Illustrations per story.")
+    p.add_argument("--scenes", type=int, default=5,
+                   help="Scenes/slides per story (default 5 — a few slides for ~1-2 min signage).")
     p.add_argument("--steps", type=int, default=-1, help="Inference steps; -1 = model default.")
     p.add_argument("--width", type=int, default=768)
     p.add_argument("--height", type=int, default=768)
@@ -223,7 +229,7 @@ def main() -> None:
                 ref_img, ref_rel = refs[e["id"]]
                 imgs.append(ref_rel)
                 for i, scene in enumerate(scenes, 1):
-                    img = render(f"{style}. {character}. Scene: {scene}", base_seed + i, ref_image=ref_img)
+                    img = render(f"{style}. {character}. Scene: {scene_prompt(scene)}", base_seed + i, ref_image=ref_img)
                     sp = out_dir / f"{e['id']}_{i}.jpg"
                     img.save(sp, quality=92)
                     imgs.append(str(cl.rel(sp)))
@@ -236,7 +242,7 @@ def main() -> None:
                 ref.save(ref_path, quality=92)
                 imgs.append(str(cl.rel(ref_path)))
                 for i, scene in enumerate(scenes, 1):
-                    img = render(f"{style}. {character}. Scene: {scene}", base_seed)
+                    img = render(f"{style}. {character}. Scene: {scene_prompt(scene)}", base_seed)
                     sp = out_dir / f"{e['id']}_{i}.jpg"
                     img.save(sp, quality=92)
                     imgs.append(str(cl.rel(sp)))

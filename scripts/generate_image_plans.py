@@ -33,12 +33,14 @@ PLAN_SYSTEM = (
 def plan_prompt(story_title: str, story_text: str, n: int) -> str:
     return (
         f"Story title: {story_title}\nStory: {story_text}\n\n"
-        f"Produce a character bible and exactly {n} illustration prompts covering the key "
-        "beats in order.\n"
+        f"Break the story into exactly {n} sequential beats — these become signage slides.\n"
         "Return ONLY a JSON array containing a SINGLE object with keys:\n"
         '  "character" — one vivid, fixed visual description of the main character(s)\n'
-        f'  "scenes"    — an array of {n} strings; each describes one scene\'s action and '
-        "setting only (do NOT restate the character's appearance)\n"
+        f'  "scenes"    — an array of exactly {n} objects, in order, each with:\n'
+        '        "prompt"  — the illustration for this beat: action + setting only (do NOT\n'
+        "                    restate the character's appearance)\n"
+        '        "caption" — one short narration sentence for this beat (what is read aloud\n'
+        "                    and shown on screen), simple and age-appropriate\n"
         "Output only the JSON array — no text before or after."
     )
 
@@ -49,7 +51,8 @@ def main() -> None:
     p.add_argument("--input", "-i", type=str, default=None,
                    help="Content JSON (default output/text/<type>.json).")
     p.add_argument("--group", "-g", nargs="+", default=None)
-    p.add_argument("--scenes", type=int, default=3, help="Scenes (illustrations) per story.")
+    p.add_argument("--scenes", type=int, default=5,
+                   help="Scenes/slides per story (default 5 — a few slides for ~1-2 min signage).")
     p.add_argument("--review", default="all", choices=["all", "approved", "pending"])
     p.add_argument("--force", action="store_true", help="Re-plan items that already have a plan.")
     cl.add_common_args(p, default_output=None)   # for --model/--device/--cpu/--download-only
@@ -92,14 +95,23 @@ def main() -> None:
                 print(f"  ⚠ [{g}] {e['id']}: no plan parsed — skipping.", flush=True)
                 continue
             plan = items[0]
-            scenes = [str(s).strip() for s in (plan.get("scenes") or []) if str(s).strip()]
             character = str(plan.get("character", "")).strip()
+            # Normalize scenes to {prompt, caption} dicts (tolerate bare strings from weaker models).
+            scenes = []
+            for s in (plan.get("scenes") or []):
+                if isinstance(s, dict):
+                    prompt = str(s.get("prompt", "")).strip()
+                    caption = str(s.get("caption", "")).strip()
+                else:
+                    prompt = caption = str(s).strip()
+                if prompt:
+                    scenes.append({"prompt": prompt, "caption": caption or prompt})
             if not character or not scenes:
                 print(f"  ⚠ [{g}] {e['id']}: empty character/scenes — skipping.", flush=True)
                 continue
             e["image_plan"] = {"character": character, "scenes": scenes}
             planned += 1
-            print(f"  ✓ [{g}] {e['id']}: {len(scenes)} scene(s) planned.", flush=True)
+            print(f"  ✓ [{g}] {e['id']}: {len(scenes)} scene/slide(s) planned.", flush=True)
 
     cl.write_store(store_path, store)
     print(f"\n✓ planned {planned} item(s) → {cl.rel(store_path)}", flush=True)

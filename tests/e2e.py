@@ -325,11 +325,41 @@ def test_generate_image_plans():
         e = cl.finalize_entry({"title": "T", "text": "A kid helps a bird.", "mood": "warm"},
                               "band", "kids", "T A", "m")
         store = make_store(tmp, "stories", {"kids": [e]})
-        queue_json([{"character": "Mika, 8, red coat", "scenes": ["waves", "runs", "smiles"]}])
+        queue_json([{"character": "Mika, 8, red coat",
+                     "scenes": [{"prompt": "waves at a bus", "caption": "Mika waves goodbye."},
+                                {"prompt": "jumps a puddle", "caption": "She leaps a puddle."}]}])
         run_main("generate_image_plans",
-                 ["--type", "stories", "--input", str(store), "--scenes", "3", "--cpu"])
+                 ["--type", "stories", "--input", str(store), "--scenes", "2", "--cpu"])
         got = json.loads(store.read_text())["kids"][0].get("image_plan")
-        assert got and got["character"] and len(got["scenes"]) == 3, f"plan bad: {got}"
+        assert got and got["character"] and len(got["scenes"]) == 2, f"plan bad: {got}"
+        assert all(isinstance(s, dict) and s["prompt"] and s["caption"] for s in got["scenes"]), got
+
+
+def test_generate_content_audio_story_slides():
+    import content_lib as cl
+    import generate_content_audio as gca
+    from generate_audio import write_wav
+    with tempfile.TemporaryDirectory() as td:
+        tmp = Path(td)
+        gca.AUDIO_ROOT = tmp / "audio"; gca.BEDS_ROOT = tmp / "beds"
+        mood = "warm"
+        (gca.BEDS_ROOT / mood).mkdir(parents=True)
+        write_wav(gca.BEDS_ROOT / mood / "1.wav", 32000, np.zeros(32000 * 8, dtype="float32"))
+        e = cl.finalize_entry({"title": "T", "text": "story", "mood": mood}, "band", "kids", "T story", "m")
+        e["image_plan"] = {"character": "Mika", "scenes": [
+            {"prompt": "p1", "caption": "Mika wakes up."},
+            {"prompt": "p2", "caption": "Mika finds a bird."},
+            {"prompt": "p3", "caption": "They become friends."}]}
+        e["images"] = ["img_ref.jpg", "img_s1.jpg", "img_s2.jpg", "img_s3.jpg"]  # ref + 3 scenes
+        store = make_store(tmp, "stories", {"kids": [e]})
+        _, log = run_main("generate_content_audio",
+                          ["--category", "stories", "--input", str(store), "--device", "cpu", "--min-slide-s", "10"])
+        got = json.loads(store.read_text())["kids"][0]
+        slides = got.get("slides")
+        assert slides and len(slides) == 3, f"expected 3 slides, got {slides} (log:\n{log})"
+        assert [s["image"] for s in slides] == ["img_s1.jpg", "img_s2.jpg", "img_s3.jpg"], "slide->scene image alignment"
+        assert all(s["caption"] and s["audio"] and s["duration_s"] >= 10 for s in slides), slides
+        assert got.get("slides_total_s", 0) >= 30, f"total {got.get('slides_total_s')}"
 
 
 def _stub_generate_image(tmp: Path):

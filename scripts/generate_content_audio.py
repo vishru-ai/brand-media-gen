@@ -121,6 +121,11 @@ def main() -> None:
     p.add_argument("--fade-out-ms", type=int, default=1400, help="Clip fade-out (smooth switch).")
     p.add_argument("--espeak-voice", default="en-us",
                    help="Voice for the espeak-ng fallback (e.g. en-us, en-gb).")
+    # Story slide options (story types become a narrated slide sequence for signage).
+    p.add_argument("--slide-postroll", type=float, default=3.5,
+                   help="Seconds of bed after each slide's narration (lets a slide linger).")
+    p.add_argument("--min-slide-s", type=float, default=12.0,
+                   help="Minimum on-screen seconds per slide (player holds the image this long).")
     args = p.parse_args()
 
     store_path = args.input or (cl.OUTPUT_DIR / f"{args.category}.json")
@@ -138,9 +143,36 @@ def main() -> None:
 
     import numpy as np
     synth, backend = _make_synth(args, np)
-    builder = SPECS[args.category].speech
-    print(f"TTS backend: {backend}  (content: '{args.category}')", flush=True)
+    spec = SPECS[args.category]
+    story_mode = spec.image_mode == "story"
+    print(f"TTS backend: {backend}  (content: '{args.category}'{', signage slides' if story_mode else ''})",
+          flush=True)
     t0 = time.monotonic()
+
+    def clip(text, mood, out_dir, stem, bed_key, postroll):
+        """Synthesize text -> voice, mix over a mood bed, write files. Returns (meta, had_bed)."""
+        voice = synth(text)
+        if voice.size == 0:
+            return None
+        out_dir.mkdir(parents=True, exist_ok=True)
+        voice_path = out_dir / f"{stem}_voice.wav"
+        write_wav(voice_path, SAMPLE_RATE, voice)
+        meta = {"voice": str(cl.rel(voice_path)), "voice_name": args.voice, "mood": mood,
+                "duration_s": round(len(voice) / SAMPLE_RATE, 1)}
+        # Same bed across a story's slides (bed_key = entry id) so the music is continuous.
+        bed_path = None if args.no_bed else pick_bed(mood, bed_key)
+        if bed_path is not None:
+            bed, bed_sr = read_wav(bed_path)
+            mix, _ = mix_voice_over_bed(
+                voice, SAMPLE_RATE, bed, bed_sr,
+                preroll_s=args.preroll, postroll_s=postroll, bed_gain=args.bed_gain,
+                fade_in_ms=args.fade_in_ms, fade_out_ms=args.fade_out_ms)
+            mix_path = out_dir / f"{stem}_mix.wav"
+            write_wav(mix_path, SAMPLE_RATE, mix)
+            meta.update({"bed": str(cl.rel(bed_path)), "mixed": str(cl.rel(mix_path)),
+                         "duration_s": round(len(mix) / SAMPLE_RATE, 1),
+                         "fade_in_ms": args.fade_in_ms, "fade_out_ms": args.fade_out_ms})
+        return meta, (bed_path is not None)
 
     made = skipped = nbeds = 0
     for group, entries in store.items():
@@ -149,50 +181,72 @@ def main() -> None:
             if args.review != "all" and e.get("review") != args.review:
                 skipped += 1
                 continue
-            if e.get("audio") and not args.force:
+            done = e.get("slides") if story_mode else e.get("audio")
+            if done and not args.force:
                 skipped += 1
                 continue
-            text = builder(e).strip()
-            if not text:
-                skipped += 1
-                continue
-            voice = synth(text)
-            if voice.size == 0:
-                skipped += 1
-                continue
-            out_dir.mkdir(parents=True, exist_ok=True)
-            voice_path = out_dir / f"{e['id']}_voice.wav"
-            write_wav(voice_path, SAMPLE_RATE, voice)
             mood = str(e.get("mood", "")).strip() or "calm"
-            meta = {"voice": str(cl.rel(voice_path)),
-                    "voice_name": args.voice, "mood": mood,
-                    "duration_s": round(len(voice) / SAMPLE_RATE, 1)}
 
-            # Background bed: pick a mood-matched bed from the library and mix the voice
-            # over it (ducked), with an overall fade-in/out so the clip transitions
-            # smoothly when the player switches content. No bed for the mood → voice-only.
-            bed_path = None if args.no_bed else pick_bed(mood, e["id"])
-            if bed_path is not None:
-                bed, bed_sr = read_wav(bed_path)
-                mix, _ = mix_voice_over_bed(
-                    voice, SAMPLE_RATE, bed, bed_sr,
-                    preroll_s=args.preroll, postroll_s=args.postroll, bed_gain=args.bed_gain,
-                    fade_in_ms=args.fade_in_ms, fade_out_ms=args.fade_out_ms)
-                mix_path = out_dir / f"{e['id']}_mix.wav"
-                write_wav(mix_path, SAMPLE_RATE, mix)
-                meta.update({"bed": str(cl.rel(bed_path)),
-                             "mixed": str(cl.rel(mix_path)),
-                             "duration_s": round(len(mix) / SAMPLE_RATE, 1),
-                             "fade_in_ms": args.fade_in_ms, "fade_out_ms": args.fade_out_ms})
-                nbeds += 1
-            e["audio"] = meta
-            e["audio_generated_at"] = cl.now_stamp()
-            made += 1
-            tag = f"voice+bed ({mood})" if bed_path is not None else f"voice only ({mood})"
-            print(f"  [{group}] {e['id']}  {meta['duration_s']:.1f}s  {tag}", flush=True)
+            if story_mode:
+                # Story -> a signage SLIDE SEQUENCE: one narrated slide per planned scene,
+                # each with its image, on-screen caption, narration+bed clip, and a hold time.
+                scenes = (e.get("image_plan") or {}).get("scenes") or []
+                if not scenes:
+                    print(f"  ⚠ [{group}] {e['id']}: no image_plan scenes — run generate_image_plans first.", flush=True)
+                    skipped += 1
+                    continue
+                imgs = e.get("images") or []
+                scene_imgs = imgs[1:] if len(imgs) > len(scenes) else imgs   # drop the ref frame if present
+                slides = []
+                for i, scene in enumerate(scenes, 1):
+                    if isinstance(scene, dict):
+                        caption = (scene.get("caption") or scene.get("prompt") or "").strip()
+                    else:
+                        caption = str(scene).strip()
+                    if not caption:
+                        continue
+                    res = clip(caption, mood, out_dir, f"{e['id']}_s{i}", e["id"], args.slide_postroll)
+                    if res is None:
+                        continue
+                    m, had_bed = res
+                    nbeds += 1 if had_bed else 0
+                    slides.append({
+                        "index": i,
+                        "image": scene_imgs[i - 1] if i - 1 < len(scene_imgs) else None,
+                        "caption": caption,
+                        "audio": m.get("mixed") or m.get("voice"),
+                        "duration_s": round(max(m["duration_s"], args.min_slide_s), 1),
+                        "mood": mood,
+                    })
+                if not slides:
+                    skipped += 1
+                    continue
+                e["slides"] = slides
+                e["slides_total_s"] = round(sum(s["duration_s"] for s in slides), 1)
+                e["audio_generated_at"] = cl.now_stamp()
+                made += 1
+                print(f"  [{group}] {e['id']}: {len(slides)} slide(s), "
+                      f"{e['slides_total_s']:.0f}s total ({mood})", flush=True)
+            else:
+                text = spec.speech(e).strip()
+                if not text:
+                    skipped += 1
+                    continue
+                res = clip(text, mood, out_dir, e["id"], e["id"], args.postroll)
+                if res is None:
+                    skipped += 1
+                    continue
+                meta, had_bed = res
+                nbeds += 1 if had_bed else 0
+                e["audio"] = meta
+                e["audio_generated_at"] = cl.now_stamp()
+                made += 1
+                tag = f"voice+bed ({mood})" if had_bed else f"voice only ({mood})"
+                print(f"  [{group}] {e['id']}  {meta['duration_s']:.1f}s  {tag}", flush=True)
 
     cl.write_store(store_path, store)
-    print(f"\n✓ {made} item(s) voiced ({nbeds} with a background bed), {skipped} skipped, "
+    unit = "story slideshow(s)" if story_mode else "item(s) voiced"
+    print(f"\n✓ {made} {unit} ({nbeds} clip(s) with a background bed), {skipped} skipped, "
           f"in {time.monotonic() - t0:.0f}s.", flush=True)
     if made and nbeds == 0 and not args.no_bed:
         print("  NOTE: no beds found — run generate_beds.py first for background music "
