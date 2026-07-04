@@ -305,6 +305,17 @@ def test_generate_content_audio_espeak_fallback():
             sys.modules["kokoro"] = saved_mod
 
 
+def test_brand_beds_map_covers_all_brands():
+    from brand_catalog import BRANDS
+    from generate_brand_beds import VIBES, BRAND_VIBE, DEFAULT_VIBE
+    slugs = [b["slug"] for b in BRANDS if b.get("slug")]
+    assert 7 <= len(VIBES) <= 10, f"expected 7-10 vibe beds, got {len(VIBES)}"
+    for s in slugs:
+        v = BRAND_VIBE.get(s, DEFAULT_VIBE)
+        assert v in VIBES, f"brand {s} -> unknown vibe {v}"
+    assert DEFAULT_VIBE in VIBES
+
+
 def test_generate_beds():
     import generate_beds as gb
     with tempfile.TemporaryDirectory() as td:
