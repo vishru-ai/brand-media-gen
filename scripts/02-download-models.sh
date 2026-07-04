@@ -2,7 +2,7 @@
 set -euo pipefail
 
 # Download model weights sized for UM880 Plus (32GB RAM, CPU inference).
-# Usage: bash scripts/02-download-models.sh [--all | --image | --video | --audio | MODEL_NAME...]
+# Usage: bash scripts/02-download-models.sh [--all | --image | --video | --audio | --text | MODEL_NAME...]
 #
 # Models are chosen/quantized to fit in 32GB RAM with headroom for the OS.
 
@@ -92,6 +92,13 @@ declare -A AUDIO_MODELS=(
     # (TTS/voiceover is Kokoro-82M, auto-downloaded by generate_tts.py's package.)
 )
 
+declare -A TEXT_MODELS=(
+    # Instruct LLMs (text). Used by generate_content.py (all content types, driven by
+    # content_types.py / content_lib.py).
+    [qwen2.5-7b-instruct]="Qwen/Qwen2.5-7B-Instruct"   # ~15GB fp16, DEFAULT (GPU)
+    [qwen2.5-3b-instruct]="Qwen/Qwen2.5-3B-Instruct"   # ~2GB, lighter/faster fallback
+)
+
 # FLUX GGUF needs only the Q4_0 file, not the full repo
 declare -A DOWNLOAD_ARGS=(
     [flux-schnell-q4]="--include 'flux1-schnell-Q4_0.gguf'"
@@ -115,17 +122,20 @@ download_specific() {
         download_model "$name" "${VIDEO_MODELS[$name]}" "${DOWNLOAD_ARGS[$name]:-}"
     elif [[ -v AUDIO_MODELS[$name] ]]; then
         download_model "$name" "${AUDIO_MODELS[$name]}" "${DOWNLOAD_ARGS[$name]:-}"
+    elif [[ -v TEXT_MODELS[$name] ]]; then
+        download_model "$name" "${TEXT_MODELS[$name]}" "${DOWNLOAD_ARGS[$name]:-}"
     else
         echo "ERROR: Unknown model '$name'"
         echo "Available image models: ${!IMAGE_MODELS[*]}"
         echo "Available video models: ${!VIDEO_MODELS[*]}"
         echo "Available audio models: ${!AUDIO_MODELS[*]}"
+        echo "Available text models: ${!TEXT_MODELS[*]}"
         return 1
     fi
 }
 
 show_usage() {
-    echo "Usage: $0 [--all | --image | --video | MODEL_NAME...]"
+    echo "Usage: $0 [--all | --image | --video | --audio | --text | MODEL_NAME...]"
     echo ""
     echo "Image models (fit in 32GB RAM):"
     echo "  flux-schnell-q4   FLUX.1 schnell Q4 GGUF (~6GB, fastest quality/speed)"
@@ -140,6 +150,10 @@ show_usage() {
     echo "  musicgen-small    MusicGen small (~2GB, text->music, fastest on CPU)"
     echo "  musicgen-medium   MusicGen medium (~6GB, better/slower)"
     echo "  (TTS/voiceover: Kokoro-82M, auto-downloaded by generate_tts.py)"
+    echo ""
+    echo "Text models (instruct LLM, for proverbs/stories/trivia generators):"
+    echo "  qwen2.5-7b-instruct  Qwen2.5 7B Instruct (~15GB, DEFAULT — runs on GPU)"
+    echo "  qwen2.5-3b-instruct  Qwen2.5 3B Instruct (~2GB, lighter/faster fallback)"
     echo ""
     echo "Recommended start: $0 flux-schnell-q4 sdxl svd-img2vid musicgen-small"
 }
@@ -156,6 +170,7 @@ for arg in "$@"; do
             download_set IMAGE_MODELS "image"
             download_set VIDEO_MODELS "video"
             download_set AUDIO_MODELS "audio"
+            download_set TEXT_MODELS "text"
             ;;
         --image)
             download_set IMAGE_MODELS "image"
@@ -165,6 +180,9 @@ for arg in "$@"; do
             ;;
         --audio)
             download_set AUDIO_MODELS "audio"
+            ;;
+        --text)
+            download_set TEXT_MODELS "text"
             ;;
         --help|-h)
             show_usage
