@@ -347,6 +347,8 @@ def _stub_generate_image(tmp: Path):
         images = [_Img()]
 
     class _Pipe:
+        unet = types.SimpleNamespace(set_default_attn_processor=lambda: calls.append("defattn"))
+        def disable_attention_slicing(self): calls.append("noslice")
         def load_ip_adapter(self, *a, **k): calls.append("ip")
         def set_ip_adapter_scale(self, s): calls.append(("scale", s))
         def __call__(self, **kw): calls.append("gen"); return _Res()
@@ -389,6 +391,8 @@ def test_generate_content_images_story_ipadapter():
         got = json.loads(store.read_text())["kids"][0]
         assert got.get("images") and len(got["images"]) == 4, f"expected ref+3 scenes, got {got.get('images')} (log:\n{log})"
         assert "ip" in calls, "IP-Adapter must load for story mode"
+        assert "defattn" in calls and calls.index("defattn") < calls.index("ip"), \
+            "UNet attention processors must be reset before load_ip_adapter (SlicedAttnProcessor bug)"
 
 
 # ── Runner ───────────────────────────────────────────────────────────────────────

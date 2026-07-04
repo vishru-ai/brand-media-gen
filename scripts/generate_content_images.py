@@ -140,12 +140,10 @@ def main() -> None:
     print(f"Loading {args.model} on {device} ({dtype})…", flush=True)
     t0 = time.monotonic()
     pipe = LOADERS[args.model](model_path, device, dtype, False)
-    if story_mode:
-        print("Loading IP-Adapter (character consistency)…", flush=True)
-        pipe.load_ip_adapter("h94/IP-Adapter", subfolder="sdxl_models",
-                             weight_name="ip-adapter_sdxl.bin")
-        pipe.set_ip_adapter_scale(args.ip_scale)
     print(f"Ready in {time.monotonic() - t0:.0f}s.\n", flush=True)
+
+    def seed_for(e):
+        return args.seed if args.seed >= 0 else int(e["id"], 16) % (2 ** 31)
 
     def render(prompt: str, seed: int, ref_image=None):
         gen = torch.Generator("cpu").manual_seed(seed)
@@ -155,29 +153,58 @@ def main() -> None:
             kw["ip_adapter_image"] = ref_image
         return pipe(**kw).images[0]
 
+    # Story mode is TWO-PHASE: once IP-Adapter is loaded, the UNet requires an image on
+    # EVERY forward, so we can't render a plain character reference afterward. Render all
+    # references FIRST (plain SDXL), THEN load IP-Adapter, then render each story's
+    # scenes conditioned on its reference.
+    refs = {}  # entry id -> (ref image, ref rel path)
+    if story_mode:
+        for g, e in targets:
+            plan = e.get("image_plan") or {}
+            character = str(plan.get("character", "")).strip()
+            if not character or not (plan.get("scenes") or []):
+                print(f"  ⚠ [{g}] {e['id']}: no image_plan — run the planner or --force. Skipping.", flush=True)
+                continue
+            out_dir = IMAGE_ROOT / args.type / g
+            out_dir.mkdir(parents=True, exist_ok=True)
+            ref = render(f"{spec.image_style}. Full-figure character reference, plain background: {character}",
+                         seed_for(e))
+            ref_path = out_dir / f"{e['id']}_ref.jpg"
+            ref.save(ref_path, quality=92)
+            refs[e["id"]] = (ref, str(cl.rel(ref_path)))
+            print(f"  [{g}] {e['id']}: character reference rendered.", flush=True)
+
+        print("Loading IP-Adapter (character consistency)…", flush=True)
+        # Our SDXL loader enables attention slicing; IP-Adapter can't convert a
+        # SlicedAttnProcessor (re-instantiated with no slice_size) — reset the UNet to
+        # default attention processors first.
+        try:
+            pipe.disable_attention_slicing()
+        except Exception:
+            pass
+        pipe.unet.set_default_attn_processor()
+        pipe.load_ip_adapter("h94/IP-Adapter", subfolder="sdxl_models",
+                             weight_name="ip-adapter_sdxl.bin")
+        pipe.set_ip_adapter_scale(args.ip_scale)
+
     made = 0
     for g, e in targets:
         out_dir = IMAGE_ROOT / args.type / g
         out_dir.mkdir(parents=True, exist_ok=True)
-        base_seed = args.seed if args.seed >= 0 else int(e["id"], 16) % (2 ** 31)
+        base_seed = seed_for(e)
         imgs = []
         t_i = time.monotonic()
 
         if story_mode:
-            plan = e.get("image_plan") or {}
-            character = str(plan.get("character", "")).strip()
-            scenes = plan.get("scenes") or []
-            if not character or not scenes:
-                print(f"  ⚠ [{g}] {e['id']}: no image_plan — run the planner or --force. Skipping.", flush=True)
+            if e["id"] not in refs:
                 continue
+            ref_img, ref_rel = refs[e["id"]]
+            imgs.append(ref_rel)
+            character = str((e.get("image_plan") or {}).get("character", "")).strip()
+            scenes = (e.get("image_plan") or {}).get("scenes") or []
             style = spec.image_style
-            # 1) character reference (seed-locked), then 2) each scene conditioned on it.
-            ref = render(f"{style}. Full-figure character reference, plain background: {character}", base_seed)
-            ref_path = out_dir / f"{e['id']}_ref.jpg"
-            ref.save(ref_path, quality=92)
-            imgs.append(str(cl.rel(ref_path)))
             for i, scene in enumerate(scenes, 1):
-                img = render(f"{style}. {character}. Scene: {scene}", base_seed + i, ref_image=ref)
+                img = render(f"{style}. {character}. Scene: {scene}", base_seed + i, ref_image=ref_img)
                 sp = out_dir / f"{e['id']}_{i}.jpg"
                 img.save(sp, quality=92)
                 imgs.append(str(cl.rel(sp)))
