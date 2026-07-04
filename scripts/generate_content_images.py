@@ -171,12 +171,12 @@ def main() -> None:
             ref = render(f"{style}. Full-figure character reference, plain background: {character}", base_seed)
             ref_path = out_dir / f"{e['id']}_ref.jpg"
             ref.save(ref_path, quality=92)
-            imgs.append(str(ref_path.relative_to(cl.PROJECT_DIR)))
+            imgs.append(str(cl.rel(ref_path)))
             for i, scene in enumerate(scenes, 1):
                 img = render(f"{style}. {character}. Scene: {scene}", base_seed + i, ref_image=ref)
                 sp = out_dir / f"{e['id']}_{i}.jpg"
                 img.save(sp, quality=92)
-                imgs.append(str(sp.relative_to(cl.PROJECT_DIR)))
+                imgs.append(str(cl.rel(sp)))
         else:
             subject = pick_subject(e)
             if not subject:
@@ -184,15 +184,15 @@ def main() -> None:
             img = render(f"{spec.image_style}. Tasteful symbolic illustration, no text: {subject}", base_seed)
             sp = out_dir / f"{e['id']}.jpg"
             img.save(sp, quality=92)
-            imgs.append(str(sp.relative_to(cl.PROJECT_DIR)))
+            imgs.append(str(cl.rel(sp)))
 
         e["images"] = imgs
         e["image_generated_at"] = cl.now_stamp()
         made += len(imgs)
-        print(f"  [{g}] {e['id']}: {len(imgs)} image(s) in {time.monotonic() - t_i:.0f}s → {out_dir.relative_to(cl.PROJECT_DIR)}/", flush=True)
+        print(f"  [{g}] {e['id']}: {len(imgs)} image(s) in {time.monotonic() - t_i:.0f}s → {cl.rel(out_dir)}/", flush=True)
 
     cl.write_store(store_path, store)
-    print(f"\n✓ {made} image(s) written; store updated → {store_path.relative_to(cl.PROJECT_DIR)}", flush=True)
+    print(f"\n✓ {made} image(s) written; store updated → {cl.rel(store_path)}", flush=True)
     print("  ⚠ Content stays review=pending — approve in the companion phone app before going live.", flush=True)
 
 

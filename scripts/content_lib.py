@@ -85,6 +85,17 @@ def now_stamp() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="seconds")
 
 
+def rel(path) -> str:
+    """Render a path relative to the project root when possible, else as-is. Guards
+    against a run crashing on the final print/record when output lives outside the
+    project (e.g. an absolute --output/--input path)."""
+    p = Path(path)
+    try:
+        return str(p.relative_to(PROJECT_DIR))
+    except ValueError:
+        return str(p)
+
+
 def add_common_args(parser, default_output: Path) -> None:
     """Register the flags every text generator shares."""
     # Default to the 7B: content runs on the GPU, which handles it comfortably and

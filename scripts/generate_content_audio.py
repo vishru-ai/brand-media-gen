@@ -135,7 +135,7 @@ def main() -> None:
             voice_path = out_dir / f"{e['id']}_voice.wav"
             write_wav(voice_path, SAMPLE_RATE, voice)
             mood = str(e.get("mood", "")).strip() or "calm"
-            meta = {"voice": str(voice_path.relative_to(cl.PROJECT_DIR)),
+            meta = {"voice": str(cl.rel(voice_path)),
                     "voice_name": args.voice, "mood": mood,
                     "duration_s": round(len(voice) / SAMPLE_RATE, 1)}
 
@@ -151,8 +151,8 @@ def main() -> None:
                     fade_in_ms=args.fade_in_ms, fade_out_ms=args.fade_out_ms)
                 mix_path = out_dir / f"{e['id']}_mix.wav"
                 write_wav(mix_path, SAMPLE_RATE, mix)
-                meta.update({"bed": str(bed_path.relative_to(cl.PROJECT_DIR)),
-                             "mixed": str(mix_path.relative_to(cl.PROJECT_DIR)),
+                meta.update({"bed": str(cl.rel(bed_path)),
+                             "mixed": str(cl.rel(mix_path)),
                              "duration_s": round(len(mix) / SAMPLE_RATE, 1),
                              "fade_in_ms": args.fade_in_ms, "fade_out_ms": args.fade_out_ms})
                 nbeds += 1
@@ -168,7 +168,7 @@ def main() -> None:
     if made and nbeds == 0 and not args.no_bed:
         print("  NOTE: no beds found — run generate_beds.py first for background music "
               "(output/audio/beds/<mood>/). Voiceover-only for now.", flush=True)
-    print(f"  Store updated: {store_path.relative_to(cl.PROJECT_DIR)}", flush=True)
+    print(f"  Store updated: {cl.rel(store_path)}", flush=True)
 
 
 if __name__ == "__main__":

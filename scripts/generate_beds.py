@@ -112,10 +112,10 @@ def main() -> None:
             wav = apply_fades(wav, sr, args.fade_in_ms, args.fade_out_ms)
             write_wav(out, sr, wav)
             made += 1
-            print(f"  ✓ {out.relative_to(cl.PROJECT_DIR)}  ({len(wav) / sr:.0f}s, "
+            print(f"  ✓ {cl.rel(out)}  ({len(wav) / sr:.0f}s, "
                   f"{time.monotonic() - t:.0f}s)", flush=True)
 
-    print(f"\n✓ {made} bed(s) → {BEDS_ROOT.relative_to(cl.PROJECT_DIR)}", flush=True)
+    print(f"\n✓ {made} bed(s) → {cl.rel(BEDS_ROOT)}", flush=True)
     print("  Now run generate_content_audio.py (or 05d --audio) to mix voiceovers over these.",
           flush=True)
 

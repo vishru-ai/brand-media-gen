@@ -105,7 +105,7 @@ def main() -> None:
               f"({len(items)} returned).", flush=True)
 
     cl.write_store(args.output, store)
-    print(f"\n✓ {total_new} new item(s) → {args.output.relative_to(cl.PROJECT_DIR)}", flush=True)
+    print(f"\n✓ {total_new} new item(s) → {cl.rel(args.output)}", flush=True)
     warn = "verified=false, review=pending" if spec.attributed else "review=pending"
     print(f"  ⚠ All entries are {warn} — approve in the companion phone app before they go live.",
           flush=True)

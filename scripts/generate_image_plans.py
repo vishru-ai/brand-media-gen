@@ -102,7 +102,7 @@ def main() -> None:
             print(f"  ✓ [{g}] {e['id']}: {len(scenes)} scene(s) planned.", flush=True)
 
     cl.write_store(store_path, store)
-    print(f"\n✓ planned {planned} item(s) → {store_path.relative_to(cl.PROJECT_DIR)}", flush=True)
+    print(f"\n✓ planned {planned} item(s) → {cl.rel(store_path)}", flush=True)
 
 
 if __name__ == "__main__":
