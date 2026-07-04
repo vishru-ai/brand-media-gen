@@ -54,18 +54,26 @@ def install_stubs() -> None:
     tr = types.ModuleType("transformers")
     tr.logging = types.SimpleNamespace(set_verbosity_error=lambda: None)
 
-    class _Inputs:
+    class _T:  # fake input_ids tensor
         shape = (1, 4)
+
+    class _Enc(dict):  # BatchEncoding-like: dict (for **unpack) + .to()
         def to(self, *a, **k): return self
 
     class _Tok:
         eos_token_id = 0
-        def apply_chat_template(self, *a, **k): return _Inputs()
+        def apply_chat_template(self, *a, return_dict=False, **k):
+            # Faithful to real transformers: return_dict=True -> a mapping unpacked
+            # with **enc; the generators MUST use that path.
+            assert return_dict, "generate_items must call apply_chat_template(return_dict=True)"
+            return _Enc(input_ids=_T())
         def decode(self, *a, **k): return _QUEUE.pop(0) if _QUEUE else "[]"
 
     class _LLM:
         def to(self, *a, **k): return self
-        def generate(self, *a, **k): return [[1, 2, 3, 4, 5]]  # out[0][4:] -> [5]
+        def generate(self, *a, **k):
+            assert "input_ids" in k, "generate() must receive **enc (input_ids=...), not a positional"
+            return [[1, 2, 3, 4, 5]]  # out[0][4:] -> [5]
 
     class _BE(dict):
         def to(self, *a, **k): return self

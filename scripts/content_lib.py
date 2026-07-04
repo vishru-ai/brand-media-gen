@@ -25,8 +25,10 @@ MODELS_DIR = PROJECT_DIR / "models"
 OUTPUT_DIR = PROJECT_DIR / "output" / "text"
 
 MODELS = {
-    "qwen2.5-3b-instruct": "Qwen/Qwen2.5-3B-Instruct",   # ~2GB fp16, default
-    "qwen2.5-7b-instruct": "Qwen/Qwen2.5-7B-Instruct",   # heavier/better, fits 32GB
+    "qwen2.5-0.5b-instruct": "Qwen/Qwen2.5-0.5B-Instruct",  # ~1GB, smoke tests / fast CPU
+    "qwen2.5-1.5b-instruct": "Qwen/Qwen2.5-1.5B-Instruct",  # ~3GB, light
+    "qwen2.5-3b-instruct":   "Qwen/Qwen2.5-3B-Instruct",    # ~6GB
+    "qwen2.5-7b-instruct":   "Qwen/Qwen2.5-7B-Instruct",    # ~15GB, DEFAULT (GPU)
 }
 
 # 4 broad age bands for age-targeted content (stories, trivia). Keys double as the
@@ -175,14 +177,18 @@ def generate_items(tok, model, device, system: str, user: str,
     """Run one chat completion and parse a JSON array from it. Returns (items, raw)."""
     messages = [{"role": "system", "content": system},
                 {"role": "user", "content": user}]
-    inputs = tok.apply_chat_template(
-        messages, add_generation_prompt=True, return_tensors="pt",
+    # return_dict=True -> a BatchEncoding (input_ids + attention_mask) that we unpack
+    # with **enc; passing the raw output positionally to generate() breaks on modern
+    # transformers (it returns a dict, not a bare tensor).
+    enc = tok.apply_chat_template(
+        messages, add_generation_prompt=True, return_tensors="pt", return_dict=True,
     ).to(device)
+    prompt_len = enc["input_ids"].shape[-1]
     out = model.generate(
-        inputs, max_new_tokens=max_new_tokens, do_sample=True,
+        **enc, max_new_tokens=max_new_tokens, do_sample=True,
         temperature=temperature, top_p=0.9, pad_token_id=tok.eos_token_id,
     )
-    raw = tok.decode(out[0][inputs.shape[-1]:], skip_special_tokens=True)
+    raw = tok.decode(out[0][prompt_len:], skip_special_tokens=True)
     return extract_json_array(raw), raw
 
 

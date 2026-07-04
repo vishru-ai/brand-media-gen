@@ -128,6 +128,10 @@ def main() -> None:
 
     device = resolve_device(args.device)
     dtype = resolve_dtype(args.dtype, device, args.model)
+    # float16 has no CPU kernels in PyTorch — SDXL fp16 crashes on CPU. Force fp32.
+    if device == "cpu" and dtype != torch.float32:
+        print("  (CPU: forcing fp32 — SDXL float16 can't run on CPU)", flush=True)
+        dtype = torch.float32
     model_path = MODELS_DIR / args.model
     if not model_path.exists():
         print(f"ERROR: {args.model} not found at {model_path}. Run: bash scripts/02-download-models.sh {args.model}")

@@ -95,8 +95,10 @@ declare -A AUDIO_MODELS=(
 declare -A TEXT_MODELS=(
     # Instruct LLMs (text). Used by generate_content.py (all content types, driven by
     # content_types.py / content_lib.py).
-    [qwen2.5-7b-instruct]="Qwen/Qwen2.5-7B-Instruct"   # ~15GB fp16, DEFAULT (GPU)
-    [qwen2.5-3b-instruct]="Qwen/Qwen2.5-3B-Instruct"   # ~2GB, lighter/faster fallback
+    [qwen2.5-7b-instruct]="Qwen/Qwen2.5-7B-Instruct"     # ~15GB fp16, DEFAULT (GPU)
+    [qwen2.5-3b-instruct]="Qwen/Qwen2.5-3B-Instruct"     # ~6GB, lighter fallback
+    [qwen2.5-1.5b-instruct]="Qwen/Qwen2.5-1.5B-Instruct" # ~3GB, light
+    [qwen2.5-0.5b-instruct]="Qwen/Qwen2.5-0.5B-Instruct" # ~1GB, smoke tests / fast CPU
 )
 
 # FLUX GGUF needs only the Q4_0 file, not the full repo
