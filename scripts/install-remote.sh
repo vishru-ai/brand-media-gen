@@ -76,25 +76,36 @@ echo "venv pip  : ${PIP_PKGS[*]:-(none)}"
 echo "apt       : ${APT_PKGS[*]:-(none)}"
 echo ""
 
-# ── Python deps into the host venv (no sudo) ─────────────────────────────────────
+# ── System deps via apt FIRST (sudo; TTY so it can prompt) ───────────────────────
+# apt runs before pip on purpose: system deps are the reliable base (espeak-ng powers
+# the TTS fallback; libsndfile backs soundfile), and pip may fail to build a package
+# on a very new Python — we must not let that skip apt.
+if [[ ${#APT_PKGS[@]} -gt 0 ]]; then
+    echo "── apt install (system, sudo) ───────────────────────────────"
+    # shellcheck disable=SC2029
+    ssh -t "$HOST" "sudo apt-get update -qq && sudo apt-get install -y ${APT_PKGS[*]}"
+    echo ""
+fi
+
+# ── Python deps into the host venv (no sudo; best-effort) ────────────────────────
 if [[ ${#PIP_PKGS[@]} -gt 0 ]]; then
     echo "── venv pip install (host) ──────────────────────────────────"
     # shellcheck disable=SC2029
-    ssh "$HOST" "set -e
+    if ssh "$HOST" "set -e
         cd ~/${REMOTE_DIR}
         source venv/bin/activate 2>/dev/null || { echo 'ERROR: venv not found — run 01-install-deps.sh first.'; exit 1; }
         # No --upgrade: install only what's missing, so we don't try to rewrite
         # existing (possibly root-owned) entry-point scripts in venv/bin.
         python -m pip install -q ${PIP_PKGS[*]}
-        echo 'installed:' ${PIP_PKGS[*]}"
-    echo ""
-fi
-
-# ── System deps via apt (sudo; TTY so it can prompt) ─────────────────────────────
-if [[ ${#APT_PKGS[@]} -gt 0 ]]; then
-    echo "── apt install (system, sudo) ───────────────────────────────"
-    # shellcheck disable=SC2029
-    ssh -t "$HOST" "sudo apt-get update -qq && sudo apt-get install -y ${APT_PKGS[*]}"
+        echo 'installed:' ${PIP_PKGS[*]}"; then
+        :
+    else
+        echo "" >&2
+        echo "WARNING: some Python deps failed to install (kokoro pulls spacy/blis, which" >&2
+        echo "  can fail to build on a very new Python). This is NON-FATAL:" >&2
+        echo "  • TTS automatically falls back to espeak-ng (installed above)." >&2
+        echo "  • For higher-quality Kokoro TTS, install it in an env that has wheels." >&2
+    fi
     echo ""
 fi
 

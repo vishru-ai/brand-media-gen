@@ -271,6 +271,40 @@ def test_generate_content_audio_with_and_without_bed():
         assert a2.get("voice") and not a2.get("mixed"), f"--no-bed should skip mix: {a2}"
 
 
+def test_generate_content_audio_espeak_fallback():
+    """When Kokoro is unavailable, TTS must fall back to espeak-ng (stubbed here)."""
+    import shutil
+    import subprocess
+    import content_lib as cl
+    import generate_content_audio as gca
+    from generate_audio import write_wav
+    saved_mod = sys.modules.pop("kokoro", None)          # force kokoro import to fail
+    saved_which, saved_run = shutil.which, subprocess.run
+    shutil.which = lambda n: "/usr/bin/espeak-ng" if n == "espeak-ng" else saved_which(n)
+
+    def fake_run(cmd, **k):
+        tmp = cmd[cmd.index("-w") + 1]                    # espeak-ng -w <tmp> writes the wav
+        write_wav(tmp, 22050, np.zeros(11025, dtype="float32"))  # 0.5s @ 22050 -> resampled to 24k
+        return types.SimpleNamespace(returncode=0)
+    subprocess.run = fake_run
+    try:
+        with tempfile.TemporaryDirectory() as td:
+            tmp = Path(td)
+            gca.AUDIO_ROOT = tmp / "audio"; gca.BEDS_ROOT = tmp / "beds"
+            e = cl.finalize_entry({"statement": "S", "detail": "d", "mood": "calm", "verified": False},
+                                  "band", "kids", "S", "m")
+            store = make_store(tmp, "facts", {"kids": [e]})
+            _, log = run_main("generate_content_audio",
+                              ["--category", "facts", "--input", str(store), "--device", "cpu", "--no-bed"])
+            a = json.loads(store.read_text())["kids"][0]["audio"]
+            assert a.get("voice") and not a.get("mixed"), f"espeak voice-only bad: {a}"
+            assert "espeak" in log, f"should report espeak backend; log:\n{log}"
+    finally:
+        shutil.which, subprocess.run = saved_which, saved_run
+        if saved_mod is not None:
+            sys.modules["kokoro"] = saved_mod
+
+
 def test_generate_beds():
     import generate_beds as gb
     with tempfile.TemporaryDirectory() as td:

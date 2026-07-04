@@ -9,13 +9,13 @@ audio assets back into each entry:
               "fade_in_ms": ..., "fade_out_ms": ...}
 Use --no-bed for voiceover only. If no bed exists for a mood, it falls back to voice.
 
-Runs on CPU by design: Kokoro-82M is tiny (near-real-time on the 8845HS) and needs
-espeak-ng, which isn't in the ROCm container — so this stage is host-venv/CPU while
-the text stage runs the 7B on the GPU. It hides the GPU so it can run right after a
-GPU text run without contending.
+Runs on CPU by design: TTS is tiny/near-real-time on the 8845HS, so this stage is
+host-venv/CPU while the text stage runs the 7B on the GPU. It hides the GPU so it can
+run right after a GPU text run without contending.
 
-Deps (host venv): pip install kokoro ; sudo apt-get install -y espeak-ng
-  or:  scripts/install-remote.sh <host> --tts
+TTS backend: Kokoro-82M if installed (best quality), else an automatic espeak-ng
+fallback (apt-installed, no Python build — always works). Set up with:
+  scripts/install-remote.sh <host> --tts    (installs espeak-ng + attempts Kokoro)
 
 ⚠ Entries stay review="pending"; generating audio does NOT approve content. In
 production, gate with --review approved so only approved items are voiced.
@@ -38,7 +38,7 @@ from content_types import SPECS
 # Reuse the stdlib WAV writer + sample rate from the TTS script (import is cheap —
 # it pulls in no torch/kokoro at module load).
 from generate_tts import write_wav, SAMPLE_RATE
-from audio_lib import read_wav, mix_voice_over_bed
+from audio_lib import read_wav, mix_voice_over_bed, resample
 
 AUDIO_ROOT = cl.PROJECT_DIR / "output" / "audio" / "content"
 BEDS_ROOT = cl.PROJECT_DIR / "output" / "audio" / "beds"
@@ -51,6 +51,47 @@ def pick_bed(mood: str, key: str):
     if not beds:
         return None
     return beds[int(key, 16) % len(beds)]
+
+
+def _make_synth(args, np):
+    """Return (synth(text)->float32 @ SAMPLE_RATE, backend_name). Prefers Kokoro for
+    quality; falls back to espeak-ng (apt-installed, no Python build) so audio always
+    works even where the Kokoro/spacy build chain won't install."""
+    want = args.device
+    try:
+        import torch
+        from kokoro import KPipeline
+        device = ("cuda" if torch.cuda.is_available() else "cpu") if want == "auto" else want
+        pipe = KPipeline(lang_code=args.lang, device=device)
+
+        def synth(text):
+            chunks = [
+                (a.detach().cpu().numpy() if hasattr(a, "detach") else np.asarray(a))
+                for _gs, _ps, a in pipe(text, voice=args.voice, speed=args.speed)
+            ]
+            return np.concatenate(chunks).astype("float32") if chunks else np.zeros(0, dtype="float32")
+        return synth, f"kokoro ({args.voice} on {device})"
+    except Exception as ex:
+        import shutil
+        import subprocess
+        import tempfile
+        if not shutil.which("espeak-ng"):
+            print(f"ERROR: Kokoro unavailable ({ex.__class__.__name__}: {ex}) and espeak-ng not found.")
+            print("       Install a TTS backend:  scripts/install-remote.sh <host> --tts")
+            sys.exit(1)
+        wpm = max(80, int(175 * args.speed))
+
+        def synth(text):
+            fd, tmp = tempfile.mkstemp(suffix=".wav")
+            os.close(fd)
+            try:
+                subprocess.run(["espeak-ng", "-v", args.espeak_voice, "-s", str(wpm), "-w", tmp, text],
+                               check=True, capture_output=True)
+                data, sr = read_wav(tmp)
+            finally:
+                os.unlink(tmp)
+            return resample(data, sr, SAMPLE_RATE) if sr != SAMPLE_RATE else data
+        return synth, f"espeak-ng ({args.espeak_voice})  [Kokoro unavailable — lower quality fallback]"
 
 
 def main() -> None:
@@ -78,6 +119,8 @@ def main() -> None:
     p.add_argument("--postroll", type=float, default=1.8, help="Seconds of bed after the voice.")
     p.add_argument("--fade-in-ms", type=int, default=800, help="Clip fade-in (smooth switch).")
     p.add_argument("--fade-out-ms", type=int, default=1400, help="Clip fade-out (smooth switch).")
+    p.add_argument("--espeak-voice", default="en-us",
+                   help="Voice for the espeak-ng fallback (e.g. en-us, en-gb).")
     args = p.parse_args()
 
     store_path = args.input or (cl.OUTPUT_DIR / f"{args.category}.json")
@@ -94,20 +137,10 @@ def main() -> None:
         os.environ.setdefault("HIP_VISIBLE_DEVICES", "")
 
     import numpy as np
-    try:
-        import torch
-        from kokoro import KPipeline
-    except ImportError:
-        print("ERROR: kokoro not installed. Run:  scripts/install-remote.sh <host> --tts")
-        print("       (or in the venv: pip install kokoro ; sudo apt-get install -y espeak-ng)")
-        sys.exit(1)
-
-    device = ("cuda" if torch.cuda.is_available() else "cpu") if args.device == "auto" else args.device
+    synth, backend = _make_synth(args, np)
     builder = SPECS[args.category].speech
-
-    print(f"Loading Kokoro-82M on {device} (voice={args.voice}) for '{args.category}'…", flush=True)
+    print(f"TTS backend: {backend}  (content: '{args.category}')", flush=True)
     t0 = time.monotonic()
-    pipeline = KPipeline(lang_code=args.lang, device=device)
 
     made = skipped = nbeds = 0
     for group, entries in store.items():
@@ -123,14 +156,10 @@ def main() -> None:
             if not text:
                 skipped += 1
                 continue
-            chunks = [
-                (a.detach().cpu().numpy() if hasattr(a, "detach") else np.asarray(a))
-                for _gs, _ps, a in pipeline(text, voice=args.voice, speed=args.speed)
-            ]
-            if not chunks:
+            voice = synth(text)
+            if voice.size == 0:
                 skipped += 1
                 continue
-            voice = np.concatenate(chunks).astype("float32")
             out_dir.mkdir(parents=True, exist_ok=True)
             voice_path = out_dir / f"{e['id']}_voice.wav"
             write_wav(voice_path, SAMPLE_RATE, voice)
