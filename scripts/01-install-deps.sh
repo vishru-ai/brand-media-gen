@@ -4,6 +4,18 @@ set -euo pipefail
 # Create Python venv and install deps for CPU-based inference on UM880 Plus.
 # Run as: bash scripts/01-install-deps.sh
 
+# ── Run-on-the-box guard ─────────────────────────────────────────────
+# On-box setup script: it builds the box's venv (Linux CPU torch), so it must run
+# on the generation box itself — not the Mac. (The "-remote" scripts run from the
+# Mac; these 00/01/02 setup scripts run on the box. The venv is per-machine and is
+# never synced — sync-remote.sh excludes it.)
+if [[ "$(uname -s)" != "Linux" ]]; then
+    echo "ERROR: this is an on-box setup script — run it ON the generation box, not $(uname -s)." >&2
+    echo "  ssh panamorphic@10.0.0.208 && cd ~/Developer/Vishru/brand-media-gen" >&2
+    echo "  then: bash scripts/$(basename "$0")" >&2
+    exit 1
+fi
+
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
 VENV_DIR="$PROJECT_DIR/venv"

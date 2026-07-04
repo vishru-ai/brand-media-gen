@@ -14,6 +14,22 @@ PROJECT_DIR = Path(__file__).resolve().parent.parent
 MODELS_DIR = PROJECT_DIR / "models"
 OUTPUT_DIR = PROJECT_DIR / "output" / "images"
 
+# FLUX ships as a GGUF transformer (local), but its T5/CLIP/VAE base is fetched
+# from HF at load time. Named here so the prefetch (05 --download-only) fetches the
+# exact same base and can't drift from the loader.
+FLUX_BASE_REPO = "black-forest-labs/FLUX.1-schnell"
+SDXL_FP16_VAE_REPO = "madebyollin/sdxl-vae-fp16-fix"
+
+
+def _hf_cached(repo: str) -> bool:
+    """True if an HF repo is already fully in the local cache (no download needed)."""
+    try:
+        from huggingface_hub import snapshot_download
+        snapshot_download(repo, local_files_only=True)
+        return True
+    except Exception:
+        return False
+
 
 def resolve_device(choice: str = "auto") -> str:
     """Map a --device choice to an actual torch device.
@@ -98,8 +114,11 @@ def load_flux_gguf(model_path: Path, device: str, dtype, low_vram: bool):
         print(f"ERROR: No .gguf file found in {model_path}")
         sys.exit(1)
 
+    if not _hf_cached(FLUX_BASE_REPO):
+        print(f"      ⇩ First run: downloading FLUX base ({FLUX_BASE_REPO}) — T5/CLIP/VAE, several GB.", flush=True)
+        print("        No per-step output until it finishes — this is NOT a hang.", flush=True)
     pipe = FluxPipeline.from_pretrained(
-        "black-forest-labs/FLUX.1-schnell",
+        FLUX_BASE_REPO,
         transformer=None,
         torch_dtype=dtype,
     )
@@ -131,9 +150,11 @@ def load_sdxl(model_path: Path, device: str, dtype, low_vram: bool):
     # bf16 has fp32's range and doesn't. Falls back gracefully if it can't be fetched.
     if dtype in (torch.float16, torch.bfloat16):
         from diffusers import AutoencoderKL
+        if not _hf_cached(SDXL_FP16_VAE_REPO):
+            print(f"      ⇩ First run: downloading SDXL fp16-fix VAE ({SDXL_FP16_VAE_REPO})…", flush=True)
         try:
             pipe.vae = AutoencoderKL.from_pretrained(
-                "madebyollin/sdxl-vae-fp16-fix", torch_dtype=dtype
+                SDXL_FP16_VAE_REPO, torch_dtype=dtype
             )
         except Exception as e:
             print(f"warning: could not load fp16-fix VAE ({e}); using stock VAE "
@@ -211,7 +232,7 @@ def generate(
     # Per-step progress so there's a visible heartbeat in SSH/log output (the tqdm
     # bar alone can be invisible when stdout isn't a live terminal).
     def on_step(pipe_, step, timestep, cb_kwargs):
-        print(f"      step {step + 1}/{steps}  ({time.monotonic() - t0:.0f}s elapsed)")
+        print(f"      step {step + 1}/{steps}  ({time.monotonic() - t0:.0f}s elapsed)", flush=True)
         return cb_kwargs
 
     kwargs = dict(

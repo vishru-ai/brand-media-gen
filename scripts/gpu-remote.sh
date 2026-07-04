@@ -81,6 +81,8 @@ fi
 ssh -t "$HOST" "$REMOTE_CMD"
 
 echo ""
-echo "Done. Images are on the box under ~/$REMOTE_DIR/output/images/"
+echo "Done. Output is on the box under ~/$REMOTE_DIR/output/ (images/ or videos/)."
+echo "Check for kernel/GPU errors (hangs, OOM, resets):"
+echo "  ssh $HOST 'sudo dmesg -T | grep -iE \"amdgpu|gpu hang|ring|reset|timeout|fault|kfd\" | tail -60'"
 echo "Tip: for unattended runs, on the box add a sudoers rule so no password is needed:"
 echo "  echo \"$REMOTE_USER ALL=(root) NOPASSWD: /usr/bin/systemctl isolate multi-user.target, /usr/bin/systemctl isolate graphical.target\" | sudo tee /etc/sudoers.d/gpu-remote-isolate"

@@ -2,9 +2,20 @@
 set -euo pipefail
 
 # Download model weights sized for UM880 Plus (32GB RAM, CPU inference).
-# Usage: bash scripts/02-download-models.sh [--all | --image | --video | MODEL_NAME...]
+# Usage: bash scripts/02-download-models.sh [--all | --image | --video | --audio | MODEL_NAME...]
 #
 # Models are chosen/quantized to fit in 32GB RAM with headroom for the OS.
+
+# ── Run-on-the-box guard ─────────────────────────────────────────────
+# On-box setup script: it downloads weights into the box's models/ dir and uses
+# the box's venv, so it must run on the generation box — not the Mac. (The
+# "-remote" scripts run from the Mac; these 00/01/02 setup scripts run on the box.)
+if [[ "$(uname -s)" != "Linux" ]]; then
+    echo "ERROR: this is an on-box setup script — run it ON the generation box, not $(uname -s)." >&2
+    echo "  ssh panamorphic@10.0.0.208 && cd ~/Developer/Vishru/brand-media-gen" >&2
+    echo "  then: bash scripts/$(basename "$0") $*" >&2
+    exit 1
+fi
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
@@ -68,6 +79,17 @@ declare -A IMAGE_MODELS=(
 
 declare -A VIDEO_MODELS=(
     [wan2.1-1.3b]="Wan-AI/Wan2.1-T2V-1.3B"
+    # Stable Video Diffusion (image->video). svd-img2vid = 14 frames (lighter,
+    # start here); svd-xt = 25 frames (better, heavier). Use with generate_svd.py.
+    [svd-img2vid]="stabilityai/stable-video-diffusion-img2vid"
+    [svd-xt]="stabilityai/stable-video-diffusion-img2vid-xt"
+)
+
+declare -A AUDIO_MODELS=(
+    # MusicGen (text->music, CPU). Use with generate_audio.py.
+    [musicgen-small]="facebook/musicgen-small"    # ~2GB, fastest on CPU
+    [musicgen-medium]="facebook/musicgen-medium"  # ~6GB, better/slower
+    # (TTS/voiceover is Kokoro-82M, auto-downloaded by generate_tts.py's package.)
 )
 
 # FLUX GGUF needs only the Q4_0 file, not the full repo
@@ -91,10 +113,13 @@ download_specific() {
         download_model "$name" "${IMAGE_MODELS[$name]}" "${DOWNLOAD_ARGS[$name]:-}"
     elif [[ -v VIDEO_MODELS[$name] ]]; then
         download_model "$name" "${VIDEO_MODELS[$name]}" "${DOWNLOAD_ARGS[$name]:-}"
+    elif [[ -v AUDIO_MODELS[$name] ]]; then
+        download_model "$name" "${AUDIO_MODELS[$name]}" "${DOWNLOAD_ARGS[$name]:-}"
     else
         echo "ERROR: Unknown model '$name'"
         echo "Available image models: ${!IMAGE_MODELS[*]}"
         echo "Available video models: ${!VIDEO_MODELS[*]}"
+        echo "Available audio models: ${!AUDIO_MODELS[*]}"
         return 1
     fi
 }
@@ -107,9 +132,16 @@ show_usage() {
     echo "  sdxl              Stable Diffusion XL (~7GB, huge ecosystem)"
     echo ""
     echo "Video models (fit in 32GB RAM):"
-    echo "  wan2.1-1.3b       Wan 2.1 1.3B (~5GB, best small video model)"
+    echo "  wan2.1-1.3b       Wan 2.1 1.3B (~5GB, text->video)"
+    echo "  svd-img2vid       Stable Video Diffusion, 14 frames (image->video, lighter)"
+    echo "  svd-xt            Stable Video Diffusion XT, 25 frames (image->video, higher quality)"
     echo ""
-    echo "Recommended start: $0 flux-schnell-q4 wan2.1-1.3b"
+    echo "Audio models (CPU):"
+    echo "  musicgen-small    MusicGen small (~2GB, text->music, fastest on CPU)"
+    echo "  musicgen-medium   MusicGen medium (~6GB, better/slower)"
+    echo "  (TTS/voiceover: Kokoro-82M, auto-downloaded by generate_tts.py)"
+    echo ""
+    echo "Recommended start: $0 flux-schnell-q4 sdxl svd-img2vid musicgen-small"
 }
 
 # ── Parse args ───────────────────────────────────────────────────────
@@ -123,12 +155,16 @@ for arg in "$@"; do
         --all)
             download_set IMAGE_MODELS "image"
             download_set VIDEO_MODELS "video"
+            download_set AUDIO_MODELS "audio"
             ;;
         --image)
             download_set IMAGE_MODELS "image"
             ;;
         --video)
             download_set VIDEO_MODELS "video"
+            ;;
+        --audio)
+            download_set AUDIO_MODELS "audio"
             ;;
         --help|-h)
             show_usage

@@ -185,9 +185,44 @@ def dry_run(tasks: list, draft: bool, model_name: str) -> None:
     print()
 
 
+def _download_only(model_name: str, dtype: str) -> None:
+    """Pre-fetch the HF-hosted components a model pulls at load time, so 05 can
+    download them with the desktop UP (before it isolates the display). The base
+    model weights themselves live under models/ (02-download-models.sh)."""
+    from huggingface_hub import snapshot_download
+    from generate_image import FLUX_BASE_REPO, SDXL_FP16_VAE_REPO
+
+    if not (MODELS_DIR / model_name).exists():
+        print(f"ERROR: base model not found at {MODELS_DIR / model_name}. "
+              f"Run: bash scripts/02-download-models.sh {model_name}")
+        sys.exit(1)
+
+    t = time.monotonic()
+    if model_name == "flux-schnell-q4":
+        # FLUX pulls its T5/CLIP/VAE base from HF; the transformer is the local GGUF,
+        # so skip the repo's (unused, ~24GB) transformer weights.
+        print(f"⇩ Pre-fetching FLUX base ({FLUX_BASE_REPO}) — T5/CLIP/VAE; desktop stays up…", flush=True)
+        snapshot_download(FLUX_BASE_REPO, ignore_patterns=["transformer/*", "*.gguf"])
+    elif model_name == "sdxl":
+        if dtype in ("fp16", "bf16", "auto"):
+            print(f"⇩ Pre-fetching SDXL fp16-fix VAE ({SDXL_FP16_VAE_REPO})…", flush=True)
+            snapshot_download(SDXL_FP16_VAE_REPO)
+        else:
+            print("✓ SDXL fp32 fetches nothing extra at runtime; nothing to prefetch.", flush=True)
+            return
+    else:
+        print(f"✓ {model_name}: no known runtime HF download; nothing to prefetch.", flush=True)
+        return
+    print(f"✓ prefetch complete in {time.monotonic() - t:.0f}s.", flush=True)
+
+
 # ── Main generation loop ───────────────────────────────────────────────────────
 
 def run(args: argparse.Namespace) -> None:
+    if getattr(args, "download_only", False):
+        _download_only(args.model, args.dtype)
+        return
+
     brand_filter  = set(args.brand)  if args.brand  else None
     format_filter = set(args.format) if args.format else None
 
@@ -284,7 +319,7 @@ def run(args: argparse.Namespace) -> None:
         t_img = time.monotonic()
 
         def _on_step(pipe_, step, timestep, cb_kwargs):
-            print(f"    step {step + 1}/{steps}  ({time.monotonic() - t_img:.0f}s elapsed)")
+            print(f"    step {step + 1}/{steps}  ({time.monotonic() - t_img:.0f}s elapsed)", flush=True)
             return cb_kwargs
 
         kwargs = dict(
@@ -420,6 +455,11 @@ def main() -> None:
         "--log-file", type=Path, default=None, metavar="PATH",
         help="Write all output to this file in addition to stdout. "
              "Default: output/brands/run-TIMESTAMP.log",
+    )
+    parser.add_argument(
+        "--download-only", action="store_true",
+        help="Fetch the model's HF-hosted components (FLUX T5/VAE base, SDXL fp16 VAE) "
+             "and exit — no generation. Used by 05 to pre-download with the desktop UP.",
     )
 
     args = parser.parse_args()

@@ -150,7 +150,7 @@ def generate(
 
     # Per-step progress so SSH/log output has a visible heartbeat.
     def on_step(pipe_, step, timestep, cb_kwargs):
-        print(f"      step {step + 1}/{steps}  ({time.monotonic() - t0:.0f}s elapsed)")
+        print(f"      step {step + 1}/{steps}  ({time.monotonic() - t0:.0f}s elapsed)", flush=True)
         return cb_kwargs
 
     kwargs = dict(

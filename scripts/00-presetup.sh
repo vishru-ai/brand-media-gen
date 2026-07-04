@@ -5,6 +5,17 @@ set -euo pipefail
 # No discrete GPU — sets up CPU inference with AMD iGPU (ROCm) as optional accelerator.
 # Run as: sudo bash scripts/00-presetup.sh
 
+# ── Run-on-the-box guard ─────────────────────────────────────────────
+# On-box setup script: it installs the box's system packages, so it must run on
+# the Linux generation box itself — not the Mac. (The "-remote" scripts are the
+# ones you run from the Mac; these 00/01/02 setup scripts run on the box.)
+if [[ "$(uname -s)" != "Linux" ]]; then
+    echo "ERROR: this is an on-box setup script — run it ON the generation box, not $(uname -s)." >&2
+    echo "  ssh panamorphic@10.0.0.208 && cd ~/Developer/Vishru/brand-media-gen" >&2
+    echo "  then: sudo bash scripts/$(basename "$0")" >&2
+    exit 1
+fi
+
 if [[ $EUID -ne 0 ]]; then
     echo "ERROR: Run this script with sudo"
     exit 1

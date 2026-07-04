@@ -222,6 +222,11 @@ if [[ "$BATCH_MODE" == "gpu" ]]; then
     # the 780M drives the display and would otherwise hang during compute.
     RUN_INVOCATION="./scripts/run-rocm.sh python scripts/generate_all_brands.py --device cuda${QUOTED_ARGS}"
     ENV_SETUP=""
+    # Pre-fetch the model's HF-hosted components (FLUX pulls its multi-GB T5/CLIP/VAE
+    # base at load time) with the desktop still UP, so a slow first-run download
+    # doesn't black out the display. No-op once cached; non-fatal (|| true).
+    PREFETCH="echo '[gen] Pre-fetching model components with the desktop UP (no blackout during download)…'
+./scripts/run-rocm.sh python scripts/generate_all_brands.py --download-only${QUOTED_ARGS} || true"
     DISPLAY_FREE="echo '[gen] Freeing display engine — desktop goes DOWN during this GPU run...'
 sudo systemctl isolate multi-user.target"
     # Safety net: restore the desktop if the session is killed/crashes mid-run.
@@ -233,6 +238,7 @@ else
     # CPU: host venv, desktop stays up.
     RUN_INVOCATION="python scripts/generate_all_brands.py --device cpu${QUOTED_ARGS}"
     ENV_SETUP="source venv/bin/activate"
+    PREFETCH=""
     DISPLAY_FREE=""
     DISPLAY_TRAP=""
     DISPLAY_RESTORE=""
@@ -245,6 +251,7 @@ REMOTE_GEN_CMD="
 cd ~/${REMOTE_DIR}
 ${ENV_SETUP}
 ${DISPLAY_TRAP}
+${PREFETCH}
 ${DISPLAY_FREE}
 
 echo '=== gen-remote-batch: starting (${BATCH_MODE} mode) ==='
@@ -304,3 +311,4 @@ echo "  Status + log tail    : $0 ${HOST_ARG} --status --tail 30"
 echo "  Stop cleanly         : $0 ${HOST_ARG} --stop"
 echo "  Tail log directly    : ssh ${HOST} \"tail -f ~/${REMOTE_DIR}/output/brands/run-*.log\""
 echo "  Watch (auto-refresh) : ssh ${HOST} \"bash ~/${REMOTE_DIR}/scripts/status.sh --watch\""
+echo "  Kernel/GPU errors    : ssh ${HOST} 'sudo dmesg -T | grep -iE \"amdgpu|gpu hang|ring|reset|timeout|fault|kfd\" | tail -60'"
