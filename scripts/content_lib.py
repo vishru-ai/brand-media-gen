@@ -62,12 +62,41 @@ def _hf_cached(repo: str) -> bool:
         return False
 
 
+def _read_object(txt: str, i: int):
+    """Read one balanced {...} object starting at txt[i]; return (obj|None, next_index).
+    Respects string quoting/escapes. Returns None for a truncated/unterminated object."""
+    depth, in_str, esc = 0, False, False
+    for j in range(i, len(txt)):
+        c = txt[j]
+        if in_str:
+            if esc:
+                esc = False
+            elif c == "\\":
+                esc = True
+            elif c == '"':
+                in_str = False
+        elif c == '"':
+            in_str = True
+        elif c == "{":
+            depth += 1
+        elif c == "}":
+            depth -= 1
+            if depth == 0:
+                try:
+                    return json.loads(txt[i:j + 1]), j + 1
+                except json.JSONDecodeError:
+                    return None, j + 1
+    return None, len(txt)   # unterminated (truncated) object
+
+
 def extract_json_array(txt: str):
-    """Pull the first well-formed JSON array out of a model response (tolerates
-    chatter around it and inner brackets in strings)."""
+    """Pull a JSON array of objects out of a model response. Tolerates chatter around
+    it, inner brackets in strings, AND a truncated array (e.g. --count overran the
+    token budget) — in that case it salvages every COMPLETE {...} object it can."""
     start = txt.find("[")
     if start == -1:
         return None
+    # Fast path: a well-formed array (try each closing ']' from the last back).
     for m in reversed(list(re.finditer(r"\]", txt))):
         end = m.start()
         if end <= start:
@@ -76,7 +105,16 @@ def extract_json_array(txt: str):
             return json.loads(txt[start:end + 1])
         except json.JSONDecodeError:
             continue
-    return None
+    # Salvage path: scan for complete top-level objects, skipping any truncated tail.
+    objs, i, n = [], start, len(txt)
+    while i < n:
+        if txt[i] == "{":
+            obj, i = _read_object(txt, i)
+            if obj is not None:
+                objs.append(obj)
+        else:
+            i += 1
+    return objs or None
 
 
 def entry_id(group_val: str, dedup_sig: str) -> str:

@@ -73,6 +73,10 @@ def main() -> None:
     cl.hide_gpu_if_cpu(args)
     tok, model, device = cl.load_model(args)
 
+    # Budget output tokens by count so a large --count doesn't truncate the JSON
+    # array (~110 tokens/item + overhead, capped so we don't run forever).
+    max_new = min(6000, 350 + args.count * 110)
+
     store = cl.load_store(args.output)
     total_new = 0
     for g in groups:
@@ -81,7 +85,7 @@ def main() -> None:
         t_gen = time.monotonic()
         items, raw = cl.generate_items(
             tok, model, device, spec.system, build_user(spec, desc, args.count),
-            max_new_tokens=1900, temperature=args.temperature,
+            max_new_tokens=max_new, temperature=args.temperature,
         )
         if not items:
             print(f"  ⚠ could not parse JSON — skipping {g}. Raw head: {raw[:160]!r}", flush=True)

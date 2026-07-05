@@ -185,6 +185,11 @@ def test_content_lib_units():
     assert cl.extract_json_array('junk [ {"a":1} ] tail') == [{"a": 1}]
     assert cl.extract_json_array("no json") is None
     assert cl.extract_json_array('[{"t":"a [b] c"}]') == [{"t": "a [b] c"}]
+    # truncated array (--count overran the token budget) -> salvage complete objects
+    assert cl.extract_json_array('[\n {"text":"one","ok":1}, {"text":"two"}, {"text":"thr') \
+        == [{"text": "one", "ok": 1}, {"text": "two"}], "must salvage complete objects from a truncated array"
+    # braces/brackets inside strings survive the salvage scan
+    assert cl.extract_json_array('[{"t":"a {x} [y]"}, {"t":"b"') == [{"t": "a {x} [y]"}]
     a, b = cl.entry_id("g", "Hello"), cl.entry_id("g", "hello")
     assert a == b, "entry_id should be case-insensitive/stable"
     store = {}
