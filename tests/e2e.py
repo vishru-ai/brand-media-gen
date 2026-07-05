@@ -310,6 +310,25 @@ def test_generate_content_audio_espeak_fallback():
             sys.modules["kokoro"] = saved_mod
 
 
+def test_signage_programs_valid_and_triggers():
+    import signage_programs as sp
+    from generate_program import validate, requirements
+    # every industry has a non-empty, valid program (types+groups exist in the registry)
+    for ind in sp.INDUSTRIES:
+        assert sp.PROGRAMS.get(ind), f"{ind}: no program"
+        ok, errs = validate(ind)
+        assert ok, f"{ind} invalid: {errs}"
+        assert requirements(ind), f"{ind}: empty requirements"
+    # trigger priority: a detected kid at a kids-zone gets kid-targeted (or default) content
+    kids = sp.eligible(sp.PROGRAMS["kids-zone"], hour=10, band="kids")
+    assert kids and all(("kids" in s.bands) or s.default for s in kids), kids
+    # demographic beats time: an adult at a cafe in the morning is NOT shown kids-only jokes
+    adult = sp.eligible(sp.PROGRAMS["cafe"], hour=8, band="adults")
+    assert adult and all(s.type != "jokes" for s in adult), adult
+    # dayparts
+    assert sp.daypart_now(8) == "morning" and sp.daypart_now(23) == "night"
+
+
 def test_brand_beds_map_covers_all_brands():
     from brand_catalog import BRANDS
     from generate_brand_beds import VIBES, BRAND_VIBE, DEFAULT_VIBE
