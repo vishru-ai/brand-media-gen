@@ -85,7 +85,11 @@ echo ""
 
 push_code() {
     echo "── PUSH code  Mac -> box ────────────────────────────────────"
-    rsync -avzh --stats \
+    # --checksum: compare file CONTENT, not just mtime+size. Without it, an edited
+    # file can be silently skipped when the box copy's timestamp looks newer/equal
+    # (the box working tree gets touched by generation runs, and openrsync on macOS
+    # is stricter about mtime). Checksums make the push reliable for a small code tree.
+    rsync -avzh --checksum --stats \
         "${DRYRUN[@]+"${DRYRUN[@]}"}" "${DELETE[@]+"${DELETE[@]}"}" "${CODE_EXCLUDES[@]}" \
         "$LOCAL_DIR/" "$HOST:$REMOTE_DIR/"
     echo ""
@@ -95,7 +99,7 @@ pull_output() {
     echo "── PULL outputs  box -> Mac ─────────────────────────────────"
     mkdir -p "$LOCAL_DIR/output"
     # No --delete here on purpose: never remove generated media locally.
-    rsync -avzh --stats "${DRYRUN[@]+"${DRYRUN[@]}"}" \
+    rsync -avzh --checksum --stats "${DRYRUN[@]+"${DRYRUN[@]}"}" \
         "$HOST:$REMOTE_DIR/output/" "$LOCAL_DIR/output/"
     echo ""
 }
