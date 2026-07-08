@@ -48,10 +48,10 @@ def load_items(types_filter=None):
     return items
 
 
-def post_batch(player, token, batch):
-    body = json.dumps({"items": batch}).encode()
+def post_json(player, token, path, payload):
+    body = json.dumps(payload).encode()
     req = urllib.request.Request(
-        f"{player.rstrip('/')}/api/generated/sync",
+        f"{player.rstrip('/')}{path}",
         data=body,
         headers={"Content-Type": "application/json"},
         method="POST",
@@ -60,6 +60,37 @@ def post_batch(player, token, batch):
         req.add_header("Authorization", f"Bearer {token}")
     with urllib.request.urlopen(req, timeout=60) as resp:
         return json.loads(resp.read())
+
+
+def post_batch(player, token, batch):
+    return post_json(player, token, "/api/generated/sync", {"items": batch})
+
+
+def sync_programs(player, token):
+    """Push the industry programs (signage_programs.py) so the player's card
+    rotation honors dayparts/weights per the screen's industry."""
+    sys.path.insert(0, str(PROJECT_DIR / "scripts"))
+    try:
+        import signage_programs as sp
+    except ImportError as e:
+        print(f"  ! programs not synced (couldn't import signage_programs: {e})", file=sys.stderr)
+        return
+    programs = {
+        industry: [
+            {
+                "type": seg.type,
+                "group": seg.group or "",
+                "dayparts": list(seg.dayparts),
+                "bands": list(seg.bands),
+                "default": seg.default,
+                "weight": seg.weight,
+            }
+            for seg in segments
+        ]
+        for industry, segments in sp.PROGRAMS.items()
+    }
+    result = post_json(player, token, "/api/generated/programs", {"programs": programs})
+    print(f"programs: {result.get('stored', 0)} industries synced")
 
 
 def main():
@@ -91,6 +122,8 @@ def main():
         f"{total['updated']} updated, {total['skipped']} skipped; "
         f"{pending} now pending review on the player"
     )
+
+    sync_programs(args.player, args.token)
 
 
 if __name__ == "__main__":
