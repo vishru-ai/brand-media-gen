@@ -43,6 +43,7 @@ def write_wav(path, sr: int, samples) -> None:
 
 
 def main() -> None:
+    """CLI entry: synthesize speech for given texts."""
     p = argparse.ArgumentParser(
         description="CPU text-to-speech with Kokoro-82M.",
         formatter_class=argparse.RawDescriptionHelpFormatter,

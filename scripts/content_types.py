@@ -146,6 +146,7 @@ def sp_travel(e):   return f"Destination: {_s(e,'place')}. {_s(e,'highlight')}. 
 def _norm_lists(*keys):
     """Coerce given fields to lists of strings (recipes: ingredients/steps)."""
     def _n(it: dict) -> dict:
+        """Coerce the listed fields to lists of strings."""
         for k in keys:
             v = it.get(k)
             if isinstance(v, str):
@@ -157,6 +158,7 @@ def _norm_lists(*keys):
 
 
 def sp_trivia(e):
+    """Spoken form of a trivia entry (question, pause, answer)."""
     q, a, ff = _s(e, "question"), _s(e, "answer"), _s(e, "fun_fact")
     opts = e.get("options") or []
     if _s(e, "kind").lower() == "mcq" and opts:
@@ -167,6 +169,7 @@ def sp_trivia(e):
 
 
 def _norm_trivia(it: dict) -> dict:
+    """Normalize trivia options/answer fields."""
     opts = [str(o).strip() for o in (it.get("options") or []) if str(o).strip()]
     kind = _s(it, "kind").lower()
     if kind not in ("mcq", "qa"):

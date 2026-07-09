@@ -52,6 +52,7 @@ def resample(x, sr_from, sr_to):
 
 
 def _fade_env(n_total, sr, in_ms, out_ms):
+    """Linear fade-in/out envelope for a clip of the given length."""
     env = np.ones(n_total, dtype="float32")
     ni = min(n_total, int(sr * in_ms / 1000))
     no = min(n_total, int(sr * out_ms / 1000))

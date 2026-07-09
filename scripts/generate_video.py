@@ -38,6 +38,7 @@ def resolve_dtype(choice: str, device: str):
 
 
 def load_wan21(model_path: Path, device: str, dtype, low_vram: bool):
+    """Load Wan 2.1 (1.3B) tuned for 32GB-RAM CPU inference."""
     from diffusers import WanPipeline
 
     pipe = WanPipeline.from_pretrained(
@@ -79,6 +80,7 @@ DEFAULTS = {
 
 
 def export_video(frames, output_path: Path, fps: int = 16):
+    """Write frames to an mp4."""
     import imageio
     import numpy as np
 
@@ -108,6 +110,7 @@ def generate(
     low_vram: str = "auto",
     output_dir: Path = OUTPUT_DIR,
 ):
+    """Run one prompt through the video pipeline and export it."""
     device = resolve_device(device)
     torch_dtype = resolve_dtype(dtype, device)
     low_vram_on = (device == "cuda") if low_vram == "auto" else (low_vram == "on")
@@ -150,6 +153,7 @@ def generate(
 
     # Per-step progress so SSH/log output has a visible heartbeat.
     def on_step(pipe_, step, timestep, cb_kwargs):
+        """Diffusers callback: per-step progress line."""
         print(f"      step {step + 1}/{steps}  ({time.monotonic() - t0:.0f}s elapsed)", flush=True)
         return cb_kwargs
 
@@ -186,6 +190,7 @@ def generate(
 
 
 def main():
+    """CLI entry for text-to-video generation."""
     parser = argparse.ArgumentParser(description="Generate brand videos (CPU)")
     parser.add_argument("--prompt", "-p", required=True)
     parser.add_argument("--negative-prompt", "-n", default="")

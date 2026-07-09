@@ -47,6 +47,7 @@ def split_prompts(raw: str) -> list[str]:
 
 
 def main() -> None:
+    """CLI entry: one image per comma-separated prompt."""
     p = argparse.ArgumentParser(
         description="Generate one image per prompt (signage feed).",
         formatter_class=argparse.RawDescriptionHelpFormatter,
@@ -112,6 +113,7 @@ def main() -> None:
         t_img = time.monotonic()
 
         def on_step(pipe_, step, timestep, cb_kwargs):
+            """Diffusers callback: per-step progress line."""
             print(f"    step {step + 1}/{steps}  ({time.monotonic() - t_img:.0f}s)")
             return cb_kwargs
 

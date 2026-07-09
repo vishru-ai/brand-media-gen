@@ -200,11 +200,13 @@ PROGRAMS: Dict[str, List[Segment]] = {
 
 # ── Trigger evaluation (shared by the player + tests) ────────────────────────────
 def _in_daypart(hour: int, part: str) -> bool:
+    """Whether an hour falls inside a daypart window (night wraps)."""
     lo, hi = DAYPARTS[part]
     return lo <= hour < hi if lo < hi else (hour >= lo or hour < hi)  # night wraps
 
 
 def daypart_now(hour: int) -> str:
+    """The daypart for the current local time."""
     for name in ("morning", "midday", "afternoon", "evening", "night"):
         if _in_daypart(hour, name):
             return name

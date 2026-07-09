@@ -244,6 +244,7 @@ def finalize_entry(content: dict, group_field: str, group_val: str,
 
 
 def load_store(path: Path) -> dict:
+    """Read a per-type JSON store ({group: [entries]}), empty when missing."""
     if path.exists():
         try:
             return json.loads(path.read_text())
@@ -253,6 +254,7 @@ def load_store(path: Path) -> dict:
 
 
 def write_store(path: Path, store: dict) -> None:
+    """Atomically write a store back to disk (pretty JSON)."""
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(store, ensure_ascii=False, indent=2) + "\n")
 

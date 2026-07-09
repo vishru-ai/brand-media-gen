@@ -55,17 +55,20 @@ from brand_catalog import BRANDS, FORMATS, DRAFT_SCALE
 class _Tee:
     """Write every print() to both the real stdout and a log file."""
     def __init__(self, log_path: Path):
+        """Track totals for the progress file."""
         log_path.parent.mkdir(parents=True, exist_ok=True)
         self._file   = open(log_path, "a", buffering=1)  # line-buffered
         self._stdout = sys.__stdout__
 
     def write(self, data: str):
+        """Tee stream writes into the log file."""
         self._stdout.write(data)
         self._stdout.flush()
         self._file.write(data)
         self._file.flush()
 
     def flush(self):
+        """Flush both streams."""
         self._stdout.flush()
         self._file.flush()
 
@@ -77,6 +80,7 @@ class _Tee:
 
 
 def _setup_logging(log_path: Path) -> _Tee:
+    """Configure file + console logging for a batch run."""
     tee = _Tee(log_path)
     sys.stdout = tee
     sys.stderr = tee
@@ -90,6 +94,7 @@ PROGRESS_FILE = OUTPUT_DIR / "progress.json"
 
 def _write_progress(done: int, total: int, last: str,
                     t_session: float, failed: int = 0) -> None:
+    """Persist batch progress for resume/status."""
     elapsed = time.monotonic() - t_session
     avg_sec = elapsed / done if done else 0
     eta_sec = avg_sec * (total - done)
@@ -111,6 +116,7 @@ def _write_progress(done: int, total: int, last: str,
 
 
 def _write_pid() -> None:
+    """Record the runner PID for status/kill tooling."""
     pid_file = OUTPUT_DIR / "run.pid"
     pid_file.parent.mkdir(parents=True, exist_ok=True)
     pid_file.write_text(str(os.getpid()) + "\n")
@@ -137,6 +143,7 @@ def build_tasks(brand_filter: set | None, format_filter: set | None) -> list:
 def out_path(model_name: str, brand_slug: str, product_slug: str, fmt_name: str) -> Path:
     # Per-model subfolder so FLUX and SDXL outputs don't overwrite each other:
     #   output/brands/<model>/<brand>/<product>--<format>.jpg
+    """Output path for one brand/product/format image."""
     return OUTPUT_DIR / model_name / brand_slug / f"{product_slug}--{fmt_name}.jpg"
 
 
@@ -153,6 +160,7 @@ def _round16(x: float) -> int:
 
 
 def target_dims(fmt_name: str, draft: bool) -> tuple[int, int]:
+    """Generation dimensions for a format (hero/tiktok/instagram/led)."""
     d = FORMATS[fmt_name]
     w, h = d["width"], d["height"]
     if draft:
@@ -173,6 +181,7 @@ def _is_blank(img) -> bool:
 # ── Dry-run printer ────────────────────────────────────────────────────────────
 
 def dry_run(tasks: list, draft: bool, model_name: str) -> None:
+    """Print the work plan without generating."""
     print(f"\nDry-run — {len(tasks)} images would be generated\n")
     col = max(len(str(out_path(model_name, b["slug"], p["slug"], f).relative_to(PROJECT_DIR)))
               for b, p, f in tasks)
@@ -219,6 +228,7 @@ def _download_only(model_name: str, dtype: str) -> None:
 # ── Main generation loop ───────────────────────────────────────────────────────
 
 def run(args: argparse.Namespace) -> None:
+    """Generate every missing brand image in the plan."""
     if getattr(args, "download_only", False):
         _download_only(args.model, args.dtype)
         return
@@ -319,6 +329,7 @@ def run(args: argparse.Namespace) -> None:
         t_img = time.monotonic()
 
         def _on_step(pipe_, step, timestep, cb_kwargs):
+            """Diffusers callback: per-step progress line."""
             print(f"    step {step + 1}/{steps}  ({time.monotonic() - t_img:.0f}s elapsed)", flush=True)
             return cb_kwargs
 
@@ -383,6 +394,7 @@ def run(args: argparse.Namespace) -> None:
 # ── CLI ────────────────────────────────────────────────────────────────────────
 
 def main() -> None:
+    """CLI entry for the full-catalog batch generator."""
     parser = argparse.ArgumentParser(
         description="Batch-generate all Vishru brand images (model loads once).",
         formatter_class=argparse.RawDescriptionHelpFormatter,

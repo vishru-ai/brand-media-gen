@@ -65,6 +65,7 @@ def _make_synth(args, np):
         pipe = KPipeline(lang_code=args.lang, device=device)
 
         def synth(text):
+            """Kokoro TTS: synthesize speech for one text."""
             chunks = [
                 (a.detach().cpu().numpy() if hasattr(a, "detach") else np.asarray(a))
                 for _gs, _ps, a in pipe(text, voice=args.voice, speed=args.speed)
@@ -82,6 +83,7 @@ def _make_synth(args, np):
         wpm = max(80, int(175 * args.speed))
 
         def synth(text):
+            """Fallback TTS backend."""
             fd, tmp = tempfile.mkstemp(suffix=".wav")
             os.close(fd)
             try:
@@ -95,6 +97,7 @@ def _make_synth(args, np):
 
 
 def main() -> None:
+    """CLI entry: voice + mood-matched bed for every unvoiced item."""
     p = argparse.ArgumentParser(
         description="Voiceover stage: synthesize audio for generated text content (Kokoro TTS, CPU).",
         formatter_class=argparse.RawDescriptionHelpFormatter,

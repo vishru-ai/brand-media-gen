@@ -74,6 +74,7 @@ def write_wav(path, sr: int, samples) -> None:
 
 
 def main() -> None:
+    """CLI entry: synthesize music beds from prompts."""
     p = argparse.ArgumentParser(
         description="Generate music/ambient audio on CPU with MusicGen.",
         formatter_class=argparse.RawDescriptionHelpFormatter,
@@ -154,6 +155,7 @@ def main() -> None:
             self.total, self.t, self.every, self.start = total, t_start, every, None
 
         def __call__(self, input_ids, scores=None, **kwargs):
+            """Diffusers callback: report step progress."""
             cur = input_ids.shape[-1]
             if self.start is None:
                 self.start = cur

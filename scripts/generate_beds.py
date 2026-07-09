@@ -33,6 +33,7 @@ BEDS_ROOT = cl.PROJECT_DIR / "output" / "audio" / "beds"
 
 
 def main() -> None:
+    """CLI entry: generate the ambient bed set."""
     p = argparse.ArgumentParser(
         description="Generate the per-mood background-music bed library (MusicGen).",
         formatter_class=argparse.RawDescriptionHelpFormatter,

@@ -67,6 +67,7 @@ def content_count(ctype: str, group: str, review: str = None) -> int:
 
 
 def compile_program(industry: str, check: bool) -> dict:
+    """Resolve an industry program into concrete content items."""
     manifest = {
         "industry": industry,
         "description": sp.INDUSTRIES[industry],
@@ -100,6 +101,7 @@ def compile_program(industry: str, check: bool) -> dict:
 
 
 def main() -> None:
+    """CLI entry: compile and print a program."""
     p = argparse.ArgumentParser(description="Compile industry signage programs into manifests.")
     p.add_argument("--industry", "-i", choices=list(sp.INDUSTRIES))
     p.add_argument("--all", action="store_true", help="Compile every industry.")

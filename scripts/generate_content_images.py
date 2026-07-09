@@ -42,6 +42,7 @@ SUBJECT_FIELDS = ("statement", "text", "title", "question", "word", "event",
 
 
 def pick_subject(entry: dict) -> str:
+    """Choose the illustration subject text from an entry."""
     for k in SUBJECT_FIELDS:
         v = str(entry.get(k, "")).strip()
         if v:
@@ -55,6 +56,7 @@ def scene_prompt(scene) -> str:
 
 
 def collect_targets(store: dict, groups, review: str, force: bool):
+    """Items still missing images, per type/group."""
     targets = []
     for g in groups:
         for e in store.get(g, []):
@@ -84,6 +86,7 @@ def run_planner(args, store_path: Path) -> None:
 
 
 def main() -> None:
+    """CLI entry: illustrate content items (single or story mode)."""
     p = argparse.ArgumentParser(
         description="Generate illustrations for content items (IP-Adapter character consistency for stories).",
         formatter_class=argparse.RawDescriptionHelpFormatter,
@@ -160,6 +163,7 @@ def main() -> None:
         return args.seed if args.seed >= 0 else int(e["id"], 16) % (2 ** 31)
 
     def render(prompt: str, seed: int, ref_image=None):
+        """Generate one image for a prompt with the loaded pipeline."""
         gen = torch.Generator("cpu").manual_seed(seed)
         kw = dict(prompt=prompt, num_inference_steps=steps, guidance_scale=guidance,
                   width=args.width, height=args.height, generator=gen)

@@ -29,6 +29,7 @@ from content_types import SPECS
 
 
 def build_user(spec, desc: str, count: int) -> str:
+    """Compose the user prompt for a spec/group/count."""
     return spec.core_prompt(desc, count) + (
         f'\n\nAlso include "mood": exactly one of {spec.moods} that best fits the item.\n'
         "Return ONLY the JSON array — no text before or after."
@@ -36,6 +37,7 @@ def build_user(spec, desc: str, count: int) -> str:
 
 
 def print_catalog() -> None:
+    """List every content type and its groups."""
     print("Content types (--type) and their groups (--group):\n")
     for name, spec in SPECS.items():
         tag = " [attributed → needs fact/attribution review]" if spec.attributed else ""
@@ -43,6 +45,7 @@ def print_catalog() -> None:
 
 
 def main() -> None:
+    """CLI entry: generate text items for the chosen types/groups."""
     p = argparse.ArgumentParser(
         description="Generate between-signage text content (all types) — draft candidates for review.",
         formatter_class=argparse.RawDescriptionHelpFormatter,

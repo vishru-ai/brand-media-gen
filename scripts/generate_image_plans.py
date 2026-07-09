@@ -31,6 +31,7 @@ PLAN_SYSTEM = (
 
 
 def plan_prompt(story_title: str, story_text: str, n: int) -> str:
+    """Build the generation prompt for one planned image."""
     return (
         f"Story title: {story_title}\nStory: {story_text}\n\n"
         f"Break the story into exactly {n} sequential beats — these become signage slides.\n"
@@ -46,6 +47,7 @@ def plan_prompt(story_title: str, story_text: str, n: int) -> str:
 
 
 def main() -> None:
+    """CLI entry: emit generation plans from the brand catalog."""
     p = argparse.ArgumentParser(description="LLM image-plan stage for narrative content (stories).")
     p.add_argument("--type", "-t", required=True, choices=list(SPECS))
     p.add_argument("--input", "-i", type=str, default=None,

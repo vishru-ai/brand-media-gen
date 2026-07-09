@@ -67,6 +67,7 @@ BRAND_VIBE = {
 
 
 def main() -> None:
+    """CLI entry: generate per-brand music beds."""
     p = argparse.ArgumentParser(
         description="Generate per-vibe brand background beds + a brand->bed map for the website.",
         formatter_class=argparse.RawDescriptionHelpFormatter,

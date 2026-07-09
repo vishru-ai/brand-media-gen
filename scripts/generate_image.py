@@ -107,6 +107,7 @@ def _finalize(pipe, device: str, low_vram: bool):
 
 
 def load_flux_gguf(model_path: Path, device: str, dtype, low_vram: bool):
+    """Load FLUX.1-schnell (Q4 GGUF) with the tuned memory settings."""
     from diffusers import FluxPipeline, GGUFQuantizationConfig
 
     gguf_file = list(model_path.glob("*.gguf"))
@@ -134,6 +135,7 @@ def load_flux_gguf(model_path: Path, device: str, dtype, low_vram: bool):
 
 
 def load_sdxl(model_path: Path, device: str, dtype, low_vram: bool):
+    """Load SDXL with the fp16-fix VAE and tiling."""
     from diffusers import StableDiffusionXLPipeline
 
     pipe = StableDiffusionXLPipeline.from_pretrained(
@@ -188,6 +190,7 @@ def generate(
     low_vram: str = "auto",
     output_dir: Path = OUTPUT_DIR,
 ):
+    """Run one prompt through the loaded pipeline and save it."""
     device = resolve_device(device)
     torch_dtype = resolve_dtype(dtype, device, model_name)
     # 'auto' keeps the model resident (no offload). On this unified-memory APU
@@ -232,6 +235,7 @@ def generate(
     # Per-step progress so there's a visible heartbeat in SSH/log output (the tqdm
     # bar alone can be invisible when stdout isn't a live terminal).
     def on_step(pipe_, step, timestep, cb_kwargs):
+        """Diffusers callback: per-step progress line."""
         print(f"      step {step + 1}/{steps}  ({time.monotonic() - t0:.0f}s elapsed)", flush=True)
         return cb_kwargs
 
@@ -266,6 +270,7 @@ def generate(
 
 
 def main():
+    """CLI entry for single-image generation."""
     parser = argparse.ArgumentParser(description="Generate brand images (CPU)")
     parser.add_argument("--prompt", "-p", required=True)
     parser.add_argument("--negative-prompt", "-n", default="")

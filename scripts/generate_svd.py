@@ -44,6 +44,7 @@ MODEL_FRAMES = {
 
 
 def resolve_device(choice: str = "auto") -> str:
+    """Pick cpu/cuda for SVD generation."""
     if choice == "auto":
         return "cuda" if torch.cuda.is_available() else "cpu"
     return choice
@@ -86,6 +87,7 @@ def pick_model(requested: str | None) -> Path:
 
 
 def main() -> None:
+    """CLI entry: image-to-video via Stable Video Diffusion."""
     p = argparse.ArgumentParser(
         description="Stable Video Diffusion: animate a still into a short clip.",
         formatter_class=argparse.RawDescriptionHelpFormatter,
@@ -161,6 +163,7 @@ def main() -> None:
     t_gen = time.monotonic()
 
     def _on_step(_pipe, step, _timestep, cbk):
+        """Diffusers callback: per-step progress line."""
         n = step + 1
         el = time.monotonic() - t_gen
         eta = (steps - n) * (el / n) if n else 0

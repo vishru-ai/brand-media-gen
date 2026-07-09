@@ -49,6 +49,7 @@ def load_items(types_filter=None):
 
 
 def post_json(player, token, path, payload):
+    """POST a JSON payload to the player, returning the parsed response."""
     body = json.dumps(payload).encode()
     req = urllib.request.Request(
         f"{player.rstrip('/')}{path}",
@@ -94,6 +95,7 @@ def sync_programs(player, token):
 
 
 def main():
+    """CLI entry: sync content stores, then the industry programs."""
     p = argparse.ArgumentParser(description="Sync generated content to a player's review queue.")
     p.add_argument("--player", required=True, help="Player base URL, e.g. http://192.168.1.50:8080")
     p.add_argument("--token", default="", help="Pairing token (required when the player enforces auth)")
