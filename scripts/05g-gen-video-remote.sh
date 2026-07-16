@@ -242,13 +242,13 @@ ${RUN_INVOCATION} 2>&1 | tee -a \"\$LOG\"
 EXIT_CODE=\${PIPESTATUS[0]}
 
 ${DISPLAY_RESTORE}
-${UPSCALE_STAGE}
 
 echo ''
 if [[ \$EXIT_CODE -eq 0 ]]; then
+    ${UPSCALE_STAGE}
     echo '✓ Video complete. See output/videos/.'
 else
-    echo \"✗ Video exited with code \$EXIT_CODE (see \$LOG)\"
+    echo \"✗ Video exited with code \$EXIT_CODE — skipping upscale (would grab a stale clip). See \$LOG\"
 fi
 echo 'Session will stay open. Detach with Ctrl-B D, or type exit to close.'
 bash

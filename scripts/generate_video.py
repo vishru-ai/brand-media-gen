@@ -124,9 +124,12 @@ def export_video(frames, output_path: Path, fps: int = 16):
 
     writer = imageio.get_writer(str(output_path), fps=fps, codec="libx264", quality=8)
     for frame in frames:
-        if hasattr(frame, "numpy"):
+        # Pipelines return frames in different shapes: Wan gives numpy/torch arrays,
+        # LTX-Video gives PIL Images. Normalize everything to a uint8 ndarray.
+        if hasattr(frame, "numpy"):          # torch tensor
             frame = frame.numpy()
-        if frame.dtype != "uint8":
+        frame = np.asarray(frame)            # PIL Image or array -> ndarray
+        if frame.dtype != np.uint8:          # float [0,1] -> uint8 [0,255]
             frame = (frame * 255).clip(0, 255).astype("uint8")
         writer.append_data(frame)
     writer.close()
