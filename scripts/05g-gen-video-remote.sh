@@ -62,6 +62,15 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
+# The base model must be present under models/ (generate_video.py won't auto-download it).
+# Default matches generate_video.py; --model/-m in the passthrough args overrides.
+MODEL="wan2.1-1.3b"
+_next_is_model=0
+for a in "${GEN_ARGS[@]+"${GEN_ARGS[@]}"}"; do
+    [[ $_next_is_model == 1 ]] && { MODEL="$a"; _next_is_model=0; }
+    [[ "$a" == "--model" || "$a" == "-m" ]] && _next_is_model=1
+done
+
 # ── Helpers (same contract as 05/05b/05c/05d/05e/05f) ──────────────────────────
 ssh_run() { ssh -o ConnectTimeout=10 "$HOST" "$@"; }
 ssh_tty() { ssh -t -o ConnectTimeout=10 "$HOST" "$@"; }
@@ -105,6 +114,15 @@ check_gpu_sudo() {
 }
 
 newest_log() { ssh_run "ls -t ~/${REMOTE_DIR}/output/videos/video-run-*.log 2>/dev/null | head -1"; }
+
+check_model() {
+    # Pre-flight: fail BEFORE isolating the display / starting tmux if the model isn't on the box.
+    if ssh_run "test -d ~/${REMOTE_DIR}/models/${MODEL}"; then return 0; fi
+    echo "ERROR: model '${MODEL}' is not on ${HOST} (~/${REMOTE_DIR}/models/${MODEL})." >&2
+    echo "       Download it first (a few GB):" >&2
+    echo "         ssh ${HOST} 'cd ~/${REMOTE_DIR} && bash scripts/02-download-models.sh ${MODEL}'" >&2
+    exit 1
+}
 
 # ── Status mode ────────────────────────────────────────────────────────────────
 if [[ "$MODE" == "status" ]]; then
@@ -162,6 +180,7 @@ if [[ -z "$PROMPT" ]]; then
 fi
 
 check_reachable
+check_model
 ensure_tmux
 [[ "$DEVICE_MODE" == "gpu" ]] && check_gpu_sudo
 
