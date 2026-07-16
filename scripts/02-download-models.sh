@@ -79,6 +79,9 @@ declare -A IMAGE_MODELS=(
 
 declare -A VIDEO_MODELS=(
     [wan2.1-1.3b]="Wan-AI/Wan2.1-T2V-1.3B"
+    # LTX-Video: efficient higher-res text->video DiT (up to ~1216x704). Use with
+    # generate_video.py --model ltx-video (larger download — incl. a T5 text encoder).
+    [ltx-video]="Lightricks/LTX-Video"
     # Stable Video Diffusion (image->video). svd-img2vid = 14 frames (lighter,
     # start here); svd-xt = 25 frames (better, heavier). Use with generate_svd.py.
     [svd-img2vid]="stabilityai/stable-video-diffusion-img2vid"
@@ -144,7 +147,8 @@ show_usage() {
     echo "  sdxl              Stable Diffusion XL (~7GB, huge ecosystem)"
     echo ""
     echo "Video models (fit in 32GB RAM):"
-    echo "  wan2.1-1.3b       Wan 2.1 1.3B (~5GB, text->video)"
+    echo "  wan2.1-1.3b       Wan 2.1 1.3B (~5GB, text->video, ~480p)"
+    echo "  ltx-video         LTX-Video (higher-res text->video, up to ~1216x704; larger)"
     echo "  svd-img2vid       Stable Video Diffusion, 14 frames (image->video, lighter)"
     echo "  svd-xt            Stable Video Diffusion XT, 25 frames (image->video, higher quality)"
     echo ""

@@ -63,8 +63,36 @@ def load_wan21(model_path: Path, device: str, dtype, low_vram: bool):
     return pipe
 
 
+def load_ltx(model_path: Path, device: str, dtype, low_vram: bool):
+    """Load LTX-Video (Lightricks) — an efficient DiT text->video model that renders
+    higher native resolution than Wan (up to ~1216x704). Prefers bf16; fp16 can go
+    unstable (black/NaN frames) so we upgrade fp16 -> bf16 here."""
+    import torch as _t
+    from diffusers import LTXPipeline
+
+    if dtype == _t.float16:
+        print("      (LTX-Video: using bf16 instead of fp16 for stability)")
+        dtype = _t.bfloat16
+    pipe = LTXPipeline.from_pretrained(str(model_path), torch_dtype=dtype)
+
+    # 780M shares system RAM and drives the display; offload idle submodules + slice
+    # the VAE to bound peak memory (LTX's VAE decode of many frames is the big spike).
+    if device == "cuda" and low_vram:
+        pipe.enable_model_cpu_offload()
+    else:
+        pipe = pipe.to(device)
+    for fn in ("enable_vae_slicing", "enable_vae_tiling"):
+        if hasattr(pipe, fn):
+            try:
+                getattr(pipe, fn)()
+            except Exception:
+                pass
+    return pipe
+
+
 LOADERS = {
     "wan2.1-1.3b": load_wan21,
+    "ltx-video": load_ltx,
 }
 
 DEFAULTS = {
@@ -75,6 +103,16 @@ DEFAULTS = {
         "height": 320,
         "num_frames": 33,
         "fps": 16,
+    },
+    # LTX-Video: dims must be multiples of 32; num_frames = 8*k + 1. 704x480 is a good
+    # higher-res start on the 780M; push to 768x512 / 1216x704 once it's proven.
+    "ltx-video": {
+        "steps": 40,
+        "guidance_scale": 3.0,
+        "width": 704,
+        "height": 480,
+        "num_frames": 121,
+        "fps": 24,
     },
 }
 
