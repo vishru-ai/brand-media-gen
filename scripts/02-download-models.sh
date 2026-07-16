@@ -104,9 +104,14 @@ declare -A TEXT_MODELS=(
     [qwen2.5-0.5b-instruct]="Qwen/Qwen2.5-0.5B-Instruct" # ~1GB, smoke tests / fast CPU
 )
 
-# FLUX GGUF needs only the Q4_0 file, not the full repo
+# Some repos ship far more than we need — restrict the download:
+#  * FLUX GGUF: only the Q4_0 file.
+#  * LTX-Video: only the diffusers layout (transformer/text_encoder/vae + model_index).
+#    The repo also carries ~225GB of single-file ComfyUI checkpoints (every version,
+#    fp32/fp8, incl. the 13B) that diffusers doesn't use — exclude those + sample media.
 declare -A DOWNLOAD_ARGS=(
     [flux-schnell-q4]="--include 'flux1-schnell-Q4_0.gguf'"
+    [ltx-video]="--exclude 'ltx-video-*' --exclude 'ltxv-*' --exclude 'media/*'"
 )
 
 download_set() {
