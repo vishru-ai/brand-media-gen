@@ -45,4 +45,29 @@ Hard limits found on LTX (see generate_video.py notes):
 ## Findings log
 (append dated entries as we test: config → time → quality note)
 
-- _(none yet)_
+### 2026-07-18 — ✅ CPU VAE decode unlocks true 1080p (`--vae-device cpu`)
+Root cause of the 1024×576 "GPU Hang": the diffusion (transformer) runs fine on the
+780M, but the big **VAE decode** wedges the GPU command processor (MES queue timeout).
+It's not GTT/OOM (GTT already 24 GB) — it's a compute-queue hang, and the fp32 3D-conv
+decode has no working HIP kernel path (`slow_conv3d` is CPU-only).
+
+Fix: pin **just the VAE decode to CPU** (`--vae-device cpu` in generate_video.py). GPU
+makes the latents; CPU decodes them. Implementation note: `vae.decode` is wrapped with
+diffusers' `@apply_forward_hook`, which under `model_cpu_offload` yanks the VAE back to
+GPU — so we transiently NULL `pipe.vae._hf_hook` for the single decode call, decode on
+CPU in fp32, and restore the hook. (Retargeting the hook's `execution_device` is unsafe
+— it also drives the pipeline's `_execution_device` for the diffusion.)
+
+Result — the config that hung the GPU 3× now runs clean:
+| Config | Time | Output | GPU |
+|--------|------|--------|-----|
+| 1024×576, 25f, 20 steps, `--vae-device cpu` | ~4 min (load 12s + gen/decode 205s + upscale) | **1024×576 native → 1920×1080 (true 1080p)** | 0 hangs, desktop healthy |
+
+Implications:
+- **True native 1080p is now viable** on the 780M (was thought impossible).
+- The earlier *frame* ceiling was also decode-bound → CPU decode may lift it too (more
+  frames = slower CPU decode, but no hang). Worth testing longer clips next.
+- Quality: to be eyeballed by user (this replaces the rejected 704×480 path).
+
+Next knobs to try: steps 20→40 at 1024×576, guidance sweep, then longer clips (49f/97f)
+on CPU decode; consider even higher native res (1216×704).

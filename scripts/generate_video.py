@@ -172,6 +172,7 @@ def generate(
     device: str = "auto",
     dtype: str = "auto",
     low_vram: str = "auto",
+    vae_device: str = "auto",
     output_dir: Path = OUTPUT_DIR,
 ):
     """Run one prompt through the video pipeline and export it."""
@@ -220,6 +221,41 @@ def generate(
     print("      (loading + offload setup is the slow, quiet part — please wait)")
     t0 = time.monotonic()
     pipe = loader(model_path, device, torch_dtype, low_vram_on)
+
+    # EXPERIMENT (explore/video-gen): pin the VAE decode to CPU. On the 780M the
+    # diffusion (transformer) runs fine on GPU at higher res, but the big VAE decode
+    # wedges the command processor (MES queue timeout -> "GPU Hang") at >704x480.
+    # The GPU makes the latents; the CPU decodes them. Slow but no queue wedge — this
+    # is what unlocks 1024x576 / true 1080p. Reuses the pipeline's own decode call, we
+    # just redirect that one op's tensors to CPU (vae is only ~1.6GB).
+    use_cpu_vae = (model_name == "ltx-video" and device == "cuda" and
+                   (vae_device == "cpu"))
+    if use_cpu_vae:
+        # Wrap ONLY vae.decode — don't touch offload hooks or move modules at load time
+        # (that corrupts the pipeline's execution-device detection and breaks the text
+        # encoder). At decode time we move the VAE + inputs to CPU (fp32) and decode
+        # there; everything else (text encoder, transformer) stays GPU-offloaded.
+        # decode() is wrapped with diffusers' @apply_forward_hook, which under
+        # model_cpu_offload moves the VAE back to the GPU right before decoding — that
+        # overrode our CPU placement and put the fp32 3D-conv on CUDA (no HIP slow_conv3d
+        # kernel). We can't just retarget the hook's execution_device (it also drives the
+        # pipeline's _execution_device for the diffusion). Instead, transiently NULL the
+        # VAE's offload hook for the single decode call (diffusion is already done on GPU
+        # by then), decode on CPU in fp32, and restore the hook afterward.
+        _orig_decode = pipe.vae.decode
+        def _cpu_decode(z, *a, **k):
+            saved_hook = getattr(pipe.vae, "_hf_hook", None)
+            pipe.vae._hf_hook = None            # bypass apply_forward_hook's GPU move
+            try:
+                pipe.vae.to("cpu", dtype=torch.float32)
+                z = z.to("cpu", dtype=torch.float32)
+                a = tuple(x.to("cpu") if torch.is_tensor(x) else x for x in a)
+                return _orig_decode(z, *a, **k)
+            finally:
+                pipe.vae._hf_hook = saved_hook
+        pipe.vae.decode = _cpu_decode
+        print("      (VAE decode pinned to CPU — avoids the 780M decode hang at higher res)")
+
     print(f"[2/3] Model ready in {time.monotonic() - t0:.0f}s. "
           f"Generating video: {width}x{height}, {num_frames} frames, {steps} steps...")
     if device == "cpu":
@@ -290,6 +326,12 @@ def main():
         help="CPU offload + attention/VAE slicing to cap memory. 'auto' = on for GPU. "
              "Keep on for the Radeon 780M to avoid OOM/GPU hangs.",
     )
+    parser.add_argument(
+        "--vae-device", default="auto", choices=["auto", "cpu"],
+        help="Where to run the VAE decode (LTX only). 'cpu' pins decode to CPU so the "
+             "GPU command processor doesn't wedge on the big decode at >704x480 — "
+             "slower, but unlocks 1024x576 / true 1080p on the 780M.",
+    )
     parser.add_argument("--output-dir", "-o", type=Path, default=OUTPUT_DIR)
     parser.add_argument("--config", "-c", type=Path, help="YAML brand config")
 
@@ -320,6 +362,7 @@ def main():
         device=args.device,
         dtype=args.dtype,
         low_vram=args.lowvram,
+        vae_device=args.vae_device,
         output_dir=args.output_dir,
     )
 
