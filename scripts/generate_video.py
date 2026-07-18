@@ -75,18 +75,39 @@ def load_ltx(model_path: Path, device: str, dtype, low_vram: bool):
         dtype = _t.bfloat16
     pipe = LTXPipeline.from_pretrained(str(model_path), torch_dtype=dtype)
 
-    # 780M shares system RAM and drives the display; offload idle submodules + slice
-    # the VAE to bound peak memory (LTX's VAE decode of many frames is the big spike).
+    # 780M shares system RAM and drives the display; offload idle submodules to bound
+    # peak memory.
     if device == "cuda" and low_vram:
         pipe.enable_model_cpu_offload()
     else:
         pipe = pipe.to(device)
-    for fn in ("enable_vae_slicing", "enable_vae_tiling"):
-        if hasattr(pipe, fn):
+
+    # VAE decode is the memory spike: LTX decodes ALL frames' latents together, so a
+    # long clip at higher res exhausts the 780M and hangs the GPU (observed: 97 frames
+    # @1024x576 hung after a 40min decode). Force TEMPORAL tiling so the VAE decodes in
+    # frame-chunks — peak memory stays ~one chunk regardless of clip length. Plain
+    # enable_vae_tiling() only tiles spatially (defaults), which wasn't enough.
+    if hasattr(pipe, "vae") and hasattr(pipe.vae, "enable_tiling"):
+        try:
+            # Keep standard short clips (<=41 frames) a single decode pass — that's the
+            # 780M's proven-fast envelope at 704x480. Only genuinely long clips get
+            # chunked (a safety net; long clips are impractically slow on this iGPU
+            # regardless — see the frame-ceiling note in main()).
+            pipe.vae.enable_tiling(
+                tile_sample_min_num_frames=41,
+                tile_sample_stride_num_frames=33,
+            )
+        except TypeError:
+            # older diffusers: no temporal kwargs — fall back to (spatial) tiling
             try:
-                getattr(pipe, fn)()
+                pipe.vae.enable_tiling()
             except Exception:
                 pass
+    if hasattr(pipe, "enable_vae_slicing"):
+        try:
+            pipe.enable_vae_slicing()
+        except Exception:
+            pass
     return pipe
 
 
@@ -104,14 +125,16 @@ DEFAULTS = {
         "num_frames": 33,
         "fps": 16,
     },
-    # LTX-Video: dims must be multiples of 32; num_frames = 8*k + 1. 704x480 is a good
-    # higher-res start on the 780M; push to 768x512 / 1216x704 once it's proven.
+    # LTX-Video: dims must be multiples of 32; num_frames = 8*k+1. Defaults are tuned to
+    # the 780M's STABLE VAE-decode envelope (measured): 704x480, 25 frames (~1s @24fps),
+    # which upscales cleanly to 1584x1080. Larger dims (e.g. 1024x576) hang the iGPU in
+    # decode; more frames get impractically slow — see the warning in generate().
     "ltx-video": {
-        "steps": 40,
+        "steps": 30,
         "guidance_scale": 3.0,
         "width": 704,
         "height": 480,
-        "num_frames": 121,
+        "num_frames": 25,
         "fps": 24,
     },
 }
@@ -174,6 +197,17 @@ def generate(
     if guidance_scale < 0:
         guidance_scale = d["guidance_scale"]
     fps = fps or d["fps"]
+
+    # 780M VAE-decode envelope (measured): LTX decodes on the Radeon 780M are stable
+    # only within ~704x480 and ~33 frames. 1024x576 hangs the GPU even at 25 frames;
+    # >~33 frames grows decode time ~3min per extra 24-frame tile and eventually wedges.
+    # Warn loudly rather than silently hang the desktop for minutes.
+    if model_name == "ltx-video" and device == "cuda":
+        if width * height > 704 * 480 or num_frames > 33:
+            print(f"  ⚠ WARNING: {width}x{height}, {num_frames} frames exceeds the 780M's "
+                  f"stable LTX decode envelope (~704x480, <=33 frames).")
+            print(f"    This will likely be very slow or HANG the GPU during VAE decode. "
+                  f"For 1080p use 704x480 -> upscale (--to 1080p); for length, loop short clips.")
 
     # CPU generator works for both CPU and GPU/offload pipelines without
     # device-mismatch errors.
