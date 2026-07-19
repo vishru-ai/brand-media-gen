@@ -71,3 +71,21 @@ Implications:
 
 Next knobs to try: steps 20→40 at 1024×576, guidance sweep, then longer clips (49f/97f)
 on CPU decode; consider even higher native res (1216×704).
+
+### 2026-07-18 — MAX-SPEC run: 1216×704, 161f, 50 steps (CPU decode)
+Pushed LTX to the top of its envelope in one shot (per "highest end, don't experiment
+anything less"). Detailed cinematic prompt + anti-toy/broken-3D negative prompt,
+guidance 4.0.
+
+| Config | Time | Output | GPU |
+|--------|------|--------|-----|
+| 1216×704, 161f, 50 steps, guidance 4.0, `--vae-device cpu` | **~3.4 hr** (12153s inference) → 1080p upscale | 1216×704 native → **1866×1080**, 161 frames (~6.7s) | 0 hangs, desktop healthy |
+
+- **It works end-to-end** — the CPU-decode unlock holds even at max res + 161 frames.
+  No GPU hang, no OOM. Diffusion ~243s/step at this size (50 steps ≈ 2.9 hr) + a long
+  CPU decode.
+- **A ~30-min network drop to the box happened mid-run; the tmux run survived it.**
+- ⚠ **Throughput problem: ~3.4 hr for ONE 6.7s clip is impractical for signage at scale.**
+  If quality clears the bar, the bottleneck is the 780M — points to a beefier edge
+  device (or a batch/offline render farm) for video, and/or a faster model.
+- Quality verdict: pending user review (clip pulled to output/videos/).
